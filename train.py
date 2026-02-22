@@ -14,11 +14,10 @@ def train():
         verbose=1, 
         tensorboard_log="./run_logs/", 
         device="auto",
-        gamma=0.9,
         )
 
     model.learn(
-        total_timesteps=500000,
+        total_timesteps=1000000,
         log_interval=1,
         progress_bar=True
         )

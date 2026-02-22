@@ -54,15 +54,15 @@ class CatEnv(MujocoEnv, EzPickle):
     def step(self, action):
         self.steps += 1
         
-        action[0] = util.map_value(action[0], -1, 1, -180, 180) # Rotation
-        action[1] = util.map_value(action[1], -1, 1, -90, 90) # Pitch
-        action[2] = util.map_value(action[2], -1, 1, -90, 90) # Tail
+        action[0] = util.map_value(action[0], -1, 1, -np.pi*4, np.pi*4) # roll
+        action[1] = util.map_value(action[1], -1, 1, -np.pi/2, np.pi/2) # pitch
+        action[2] = util.map_value(action[2], -1, 1, -np.pi/2, np.pi/2) # tail
 
         torque = np.zeros(4)
         torque[0] = self.pd[0].get_torque(action[0], 
                                           self.data.qpos[self._joint_qpos_idx["rot1"]], 
                                           self.data.qvel[self._joint_qvel_idx["rot1"]])
-        torque[1] = self.pd[1].get_torque(-90, # FIXME
+        torque[1] = self.pd[1].get_torque(-1.57, # FIXME
                                           self.data.qpos[self._joint_qpos_idx["pitch"]], 
                                           self.data.qvel[self._joint_qvel_idx["pitch"]])
         torque[2] = self.pd[2].get_torque(-action[0],
@@ -90,6 +90,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self.steps = 0
         qpos = self.init_qpos #+ self.np_random.uniform(low=-0.1, high=0.1, size=self.model.nq)
         qvel = self.init_qvel #+ self.np_random.uniform(low=-0.1, high=0.1, size=self.model.nv)
+        qpos[self._joint_qpos_idx["pitch"]] = -1.57
         self.set_state(qpos, qvel)
         return self._get_obs()
 
@@ -107,18 +108,14 @@ class CatEnv(MujocoEnv, EzPickle):
         r_front = R.from_quat(front_quat[[1,2,3,0]])
         r_rear = R.from_quat(rear_quat[[1,2,3,0]])
 
-        # front_roll, front_pitch, front_yaw = r_front.as_euler("xyz", degrees=True)
-        # rear_roll, rear_pitch, rear_yaw = r_rear.as_euler("xyz", degrees=True)
+        front_roll, front_pitch, front_yaw = r_front.as_euler("xyz", degrees=False)
+        rear_roll, rear_pitch, rear_yaw = r_rear.as_euler("xyz", degrees=False)
 
-        front = r_front.as_matrix()[2,2]
-        rear = r_rear.as_matrix()[2,2]
-        # print(front, rear)
-        return 0.5*np.exp(-(1+front)) + 0.5*np.exp(-(1+rear))
+        reward_front = (-np.cos(front_roll) + 1) / 2
+        reward_rear = (-np.cos(rear_roll) + 1) / 2
+        rwd = 0.5 * reward_front + 0.5 * reward_rear
+        return rwd
 
-        # r_front = np.exp(-((180 - front_roll)**2)/(180*180))
-        # r_rear = np.exp(-((180 - rear_roll)**2)/(180*180))
-
-        # return 0.5*(r_front + r_rear)
     
     def _is_terminated(self):
         return False
