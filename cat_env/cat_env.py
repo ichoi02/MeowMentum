@@ -14,7 +14,7 @@ class CatEnv(MujocoEnv, EzPickle):
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
         
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float64)
+        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(29,), dtype=np.float64)
         action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float64)
 
         MujocoEnv.__init__(
@@ -22,7 +22,7 @@ class CatEnv(MujocoEnv, EzPickle):
             model_path=model_path,
             frame_skip=1,
             observation_space=observation_space,
-            default_camera_config={"distance": 3.0, "lookat": np.array([0.0, 0.0, 2.5])},
+            default_camera_config={"distance": 3.0, "lookat": np.array([0.0, 0.0, 2])},
             render_mode=render_mode
         )
         self.action_space = action_space
@@ -33,7 +33,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self._joint_qpos_idx = {}
         self._joint_qvel_idx = {}
         
-        for name in ["front_body", "rear_body"]:
+        for name in ["front_body", "rear_body", "spine_1", "tail"]:
             self._body_idx[name] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
             
         for name in ["rot1", "pitch", "rot2", "tail"]:
@@ -54,21 +54,23 @@ class CatEnv(MujocoEnv, EzPickle):
     def step(self, action):
         self.steps += 1
         
+        action = np.clip(action, -1, 1)
+
         action[0] = util.map_value(action[0], -1, 1, -np.pi*4, np.pi*4) # roll
-        action[1] = util.map_value(action[1], -1, 1, -np.pi/2, np.pi/2) # pitch
+        action[1] = util.map_value(action[1], -1, 1, -np.pi, np.pi) # pitch
         action[2] = util.map_value(action[2], -1, 1, -np.pi/2, np.pi/2) # tail
 
         torque = np.zeros(4)
-        torque[0] = self.pd[0].get_torque(action[0], 
+        torque[0] = self.pd[0].get_torque(action[0],
                                           self.data.qpos[self._joint_qpos_idx["rot1"]], 
                                           self.data.qvel[self._joint_qvel_idx["rot1"]])
-        torque[1] = self.pd[1].get_torque(-1.57, # FIXME
+        torque[1] = self.pd[1].get_torque(action[1],
                                           self.data.qpos[self._joint_qpos_idx["pitch"]], 
                                           self.data.qvel[self._joint_qvel_idx["pitch"]])
         torque[2] = self.pd[2].get_torque(-action[0],
                                           self.data.qpos[self._joint_qpos_idx["rot2"]], 
                                           self.data.qvel[self._joint_qvel_idx["rot2"]])
-        torque[3] = self.pd[3].get_torque(0, # FIXME
+        torque[3] = self.pd[3].get_torque(action[2],
                                           self.data.qpos[self._joint_qpos_idx["tail"]], 
                                           self.data.qvel[self._joint_qvel_idx["tail"]])
 
@@ -88,34 +90,48 @@ class CatEnv(MujocoEnv, EzPickle):
 
     def reset_model(self):
         self.steps = 0
-        qpos = self.init_qpos #+ self.np_random.uniform(low=-0.1, high=0.1, size=self.model.nq)
-        qvel = self.init_qvel #+ self.np_random.uniform(low=-0.1, high=0.1, size=self.model.nv)
-        qpos[self._joint_qpos_idx["pitch"]] = -1.57
+        qpos = self.init_qpos.copy() # Fixed reference bug
+        qvel = self.init_qvel.copy()
+
         self.set_state(qpos, qvel)
         return self._get_obs()
 
     def _get_obs(self):
         front_body_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_body_quat = self.data.xquat[self._body_idx["rear_body"]]
-        obs = np.concatenate([front_body_quat, rear_body_quat])
+        
+        obs = np.concatenate([
+            front_body_quat, 
+            rear_body_quat, 
+            self.data.qpos, 
+            self.data.qvel
+        ])
         return obs
 
     def _get_reward(self):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
-        tail_angle = self.data.qpos[self._joint_qpos_idx["tail"]]
+        spine_quat = self.data.xquat[self._body_idx["spine_1"]]
 
-        r_front = R.from_quat(front_quat[[1,2,3,0]])
-        r_rear = R.from_quat(rear_quat[[1,2,3,0]])
+        # rotation matricies
+        r_front = R.from_quat(front_quat[[1, 2, 3, 0]])
+        r_rear = R.from_quat(rear_quat[[1, 2, 3, 0]])
+        r_spine = R.from_quat(spine_quat[[1, 2, 3, 0]])
 
-        front_roll, front_pitch, front_yaw = r_front.as_euler("xyz", degrees=False)
-        rear_roll, rear_pitch, rear_yaw = r_rear.as_euler("xyz", degrees=False)
+        # transform local z vectors to global
+        front_up = -r_front.apply([0, 0, 1])
+        rear_up = -r_rear.apply([0, 0, 1])
+        spine_up = -r_spine.apply([0, 0, 1])
 
-        reward_front = (-np.cos(front_roll) + 1) / 2
-        reward_rear = (-np.cos(rear_roll) + 1) / 2
-        rwd = 0.5 * reward_front + 0.5 * reward_rear
-        return rwd
+        # get z component and scale
+        reward_front = (front_up[2] + 1) / 2
+        reward_rear = (rear_up[2] + 1) / 2
+        reward_spine = (spine_up[2] + 1) / 2
+        
+        reward = (reward_front + reward_rear + reward_spine) / 3
+        reward *= np.tanh(self.steps*0.03) # lower the reward weights
 
+        return reward
     
     def _is_terminated(self):
         return False

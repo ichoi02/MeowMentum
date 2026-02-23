@@ -6,7 +6,7 @@
 
   <default>
     <joint limited="true" damping="0.1" armature="0.01"/>
-    <motor ctrllimited="true" ctrlrange="-3.0 3.0"/>
+    <motor ctrllimited="true" ctrlrange="-2.0 2.0"/>
   </default>
 
   <asset>
@@ -19,29 +19,29 @@
     <light directional="true" diffuse=".8 .8 .8" pos="0 0 10" dir="0 0 -1"/>
 
     <geom name="floor" type="plane" size="0 0 0.05" material="grey"/>
-    <body name="front_body" pos="0 0 3" euler="0 0.785 0">
+    <body name="front_body" pos="0 0 3" euler="0 0 0">
       <freejoint name="root"/>
-      <inertial pos="0 0 0" mass="0.6" diaginertia="0.002 0.002 0.002"/>
+      <inertial pos="0 0 0" mass="1.5" diaginertia="0.0025 0.0025 0.0025"/>
       <geom type="box" size="0.05 0.05 0.05" material="white"/>
       
       <body name="spine_1" pos="0.1 0 0">
         <joint name="rot1" type="hinge" axis="1 0 0" range="-14 14"/>
-        <inertial pos="0 0 0" mass="0.001" diaginertia="0.00001 0.00001 0.00001"/>
+        <inertial pos="0 0 0" mass="0.2" diaginertia="0.00005 0.00009 0.00005"/>
         <geom type="cylinder" size="0.03 0.01" pos="0 -0.01 0" euler="1.5708 0 0" material="white"/>
 
         <body name="spine_2" pos="0.0 0 0">
-          <joint name="pitch" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
-          <inertial pos="0 0 0" mass="0.001" diaginertia="0.00001 0.00001 0.00001"/>
+          <joint name="pitch" type="hinge" axis="0 1 0" range="-3.14 3.14"/>
+          <inertial pos="0 0 0" mass="0.2" diaginertia="0.00005 0.00009 0.00005"/>
           <geom type="cylinder" size="0.03 0.01" pos="0 0.01 0" euler="1.5708 0 0" material="black"/>
 
           <body name="rear_body" pos="0.1 0 0">
             <joint name="rot2" type="hinge" axis="1 0 0" range="-14 14"/>
-            <inertial pos="0 0 0" mass="0.6" diaginertia="0.00167 0.00167 0.00167"/>
+            <inertial pos="0 0 0" mass="1.5" diaginertia="0.0025 0.0025 0.0025"/>
             <geom type="box" size="0.05 0.05 0.05" material="black"/>
 
             <body name="tail" pos="0.05 0 0">
               <joint name="tail" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
-              <inertial pos="0 0 0" mass="0.00001" diaginertia="0.00001 0.00001 0.00001"/>
+              <inertial pos="0.05 0 0" mass="0.15" diaginertia="0.00001 0.00013 0.00013"/>
               <geom type="cylinder" size="0.01 0.05" pos="0.05 0 0" euler="0 1.5708 0" material="grey"/>
             </body>
             
