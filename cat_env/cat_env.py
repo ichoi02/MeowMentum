@@ -33,7 +33,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self._joint_qpos_idx = {}
         self._joint_qvel_idx = {}
         
-        for name in ["front_body", "rear_body", "spine_1", "tail"]:
+        for name in ["front_body", "rear_body", "spine_1", "spine_2", "tail"]:
             self._body_idx[name] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
             
         for name in ["rot1", "pitch", "rot2", "tail"]:
@@ -111,25 +111,29 @@ class CatEnv(MujocoEnv, EzPickle):
     def _get_reward(self):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
-        spine_quat = self.data.xquat[self._body_idx["spine_1"]]
+        spine1_quat = self.data.xquat[self._body_idx["spine_1"]]
+        spine2_quat = self.data.xquat[self._body_idx["spine_2"]]
 
         # rotation matricies
         r_front = R.from_quat(front_quat[[1, 2, 3, 0]])
         r_rear = R.from_quat(rear_quat[[1, 2, 3, 0]])
-        r_spine = R.from_quat(spine_quat[[1, 2, 3, 0]])
+        r_spine1 = R.from_quat(spine1_quat[[1, 2, 3, 0]])
+        r_spine2 = R.from_quat(spine2_quat[[1, 2, 3, 0]])
 
         # transform local z vectors to global
         front_up = -r_front.apply([0, 0, 1])
         rear_up = -r_rear.apply([0, 0, 1])
-        spine_up = -r_spine.apply([0, 0, 1])
+        spine1_up = -r_spine1.apply([0, 0, 1])
+        spine2_up = -r_spine2.apply([0, 0, 1])
 
         # get z component and scale
         reward_front = (front_up[2] + 1) / 2
         reward_rear = (rear_up[2] + 1) / 2
-        reward_spine = (spine_up[2] + 1) / 2
+        reward_spine1 = (spine1_up[2] + 1) / 2
+        reward_spine2 = (spine2_up[2] + 1) / 2
         
-        reward = (reward_front + reward_rear + reward_spine) / 3
-        reward *= np.tanh(self.steps*0.03) # lower the reward weights
+        reward = reward_front*reward_rear*reward_spine1*reward_spine2
+        reward *= np.tanh(self.steps*0.05) # lower the reward weights
 
         return reward
     
