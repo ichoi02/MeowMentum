@@ -56,8 +56,8 @@ class CatEnv(MujocoEnv, EzPickle):
         
         action = np.clip(action, -1, 1)
 
-        action[0] = util.map_value(action[0], -1, 1, -np.pi*4, np.pi*4) # roll
-        action[1] = util.map_value(action[1], -1, 1, -np.pi, np.pi) # pitch
+        action[0] = util.map_value(action[0], -1, 1, -np.pi*2, np.pi*2) # roll
+        action[1] = util.map_value(action[1], -1, 1, -np.pi*2, np.pi*2) # pitch
         action[2] = util.map_value(action[2], -1, 1, -np.pi/2, np.pi/2) # tail
 
         torque = np.zeros(4)
@@ -73,8 +73,7 @@ class CatEnv(MujocoEnv, EzPickle):
         torque[3] = self.pd[3].get_torque(action[2],
                                           self.data.qpos[self._joint_qpos_idx["tail"]], 
                                           self.data.qvel[self._joint_qvel_idx["tail"]])
-
-
+        
         self.do_simulation(torque, self.frame_skip)
 
         observation = self._get_obs()
@@ -90,8 +89,13 @@ class CatEnv(MujocoEnv, EzPickle):
 
     def reset_model(self):
         self.steps = 0
-        qpos = self.init_qpos.copy() # Fixed reference bug
+        qpos = self.init_qpos.copy()
         qvel = self.init_qvel.copy()
+        
+        # randomize initial rotation
+        random_quat = np.random.rand(4)
+        random_quat /= np.linalg.norm(random_quat)
+        qpos[3:7] = random_quat
 
         self.set_state(qpos, qvel)
         return self._get_obs()

@@ -9,10 +9,11 @@
     <motor ctrllimited="true" ctrlrange="-2.0 2.0"/>
   </default>
 
-  <asset>
+<asset>
     <material name="grey" rgba="0.5 0.5 0.5 1"/>
-    <material name="white" rgba="0.9 0.9 0.9 1"/>
-    <material name="black" rgba="0.1 0.1 0.1 1"/>
+    <material name="cream" rgba="0.95 0.90 0.80 1"/>
+    <material name="light_brown" rgba="0.82 0.60 0.40 1"/>
+    <material name="dark_brown" rgba="0.55 0.35 0.20 1"/>
   </asset>
 
   <worldbody>
@@ -22,27 +23,27 @@
     <body name="front_body" pos="0 0 3" euler="0 0 0">
       <freejoint name="root"/>
       <inertial pos="0 0 0" mass="1.5" diaginertia="0.0025 0.0025 0.0025"/>
-      <geom type="box" size="0.05 0.05 0.05" material="white"/>
+      <geom type="box" size="0.05 0.05 0.05" material="cream"/>
       
       <body name="spine_1" pos="0.1 0 0">
-        <joint name="rot1" type="hinge" axis="1 0 0" range="-14 14"/>
+        <joint name="rot1" type="hinge" axis="1 0 0" range="-3.14 3.14"/>
         <inertial pos="0 0 0" mass="0.2" diaginertia="0.00005 0.00009 0.00005"/>
-        <geom type="cylinder" size="0.03 0.01" pos="0 -0.01 0" euler="1.5708 0 0" material="white"/>
+        <geom type="cylinder" size="0.03 0.01" pos="0 -0.01 0" euler="1.5708 0 0" material="cream"/>
 
         <body name="spine_2" pos="0.0 0 0">
           <joint name="pitch" type="hinge" axis="0 1 0" range="-3.14 3.14"/>
           <inertial pos="0 0 0" mass="0.2" diaginertia="0.00005 0.00009 0.00005"/>
-          <geom type="cylinder" size="0.03 0.01" pos="0 0.01 0" euler="1.5708 0 0" material="black"/>
+          <geom type="cylinder" size="0.03 0.01" pos="0 0.01 0" euler="1.5708 0 0" material="dark_brown"/>
 
           <body name="rear_body" pos="0.1 0 0">
-            <joint name="rot2" type="hinge" axis="1 0 0" range="-14 14"/>
+            <joint name="rot2" type="hinge" axis="1 0 0" range="-3.14 3.14"/>
             <inertial pos="0 0 0" mass="1.5" diaginertia="0.0025 0.0025 0.0025"/>
-            <geom type="box" size="0.05 0.05 0.05" material="black"/>
+            <geom type="box" size="0.05 0.05 0.05" material="dark_brown"/>
 
             <body name="tail" pos="0.05 0 0">
               <joint name="tail" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
               <inertial pos="0.05 0 0" mass="0.15" diaginertia="0.00001 0.00013 0.00013"/>
-              <geom type="cylinder" size="0.01 0.05" pos="0.05 0 0" euler="0 1.5708 0" material="grey"/>
+              <geom type="cylinder" size="0.01 0.05" pos="0.05 0 0" euler="0 1.5708 0" material="light_brown"/>
             </body>
             
           </body>
