@@ -29,11 +29,11 @@ def visualize():
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         body_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "spine_1")
         viewer.cam.trackbodyid = body_id
-        viewer.cam.distance = 2.5
+        viewer.cam.distance = 1.5
         viewer.cam.elevation = -20
         viewer.cam.azimuth = 90
 
-        slow = 0.1
+        slow = 0.25
 
         try:
             while viewer.is_running():

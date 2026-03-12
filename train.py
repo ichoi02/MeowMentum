@@ -14,7 +14,7 @@ def train():
         verbose=1, 
         tensorboard_log="./run_logs/", 
         device="auto",
-        seed=99,
+        seed=7,
         )
 
     model.learn(

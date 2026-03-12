@@ -8,13 +8,20 @@ import cat_env.env_util as util
 import mujoco
 import os
 
+# ---- train parameters ----
+w_pos = 1.0 # pose reward weight
+w_sm = -0.1 # smoothness reward weight
+w_en = -0.1 # energy consumption reward weight
+k = 0.1  # tanh gain param
+# --------------------------
+
 class CatEnv(MujocoEnv, EzPickle):
     metadata = {"render_modes": ["human", "rgb_array", "depth_array"], "render_fps": 100}
 
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
         
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(29,), dtype=np.float64)
+        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(40,), dtype=np.float64)
         action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float64)
 
         MujocoEnv.__init__(
@@ -44,23 +51,33 @@ class CatEnv(MujocoEnv, EzPickle):
         # Initialize variables
         self.steps = 0
         self.max_steps = 75
+        self.prev_action = np.zeros_like(action_space.shape)
 
         self.pd = []
-        self.pd.append(util.PDController(10, 1))
-        self.pd.append(util.PDController(10, 1))
-        self.pd.append(util.PDController(10, 1))
-        self.pd.append(util.PDController(10, 1))
+        self.pd.append(util.PDController(1, 0.1))
+        self.pd.append(util.PDController(1, 0.1))
+        self.pd.append(util.PDController(1, 0.1))
+        self.pd.append(util.PDController(1, 0.1))
 
     def step(self, action):
         self.steps += 1
         
         action = np.clip(action, -1, 1)
 
+        torque = np.zeros(4)
+
+        # E2E control
+        # torque[0] = util.map_value(action[0], -1, 1, -1.0, 1.0) # roll
+        # torque[1] = util.map_value(action[1], -1, 1, -1.0, 1.0)
+        # torque[2] = util.map_value(-action[0], -1, 1, -1.0, 1.0)
+        # torque[3] = util.map_value(action[2], -1, 1, -1.0, 1.0)
+        
+
+        # PD control
         action[0] = util.map_value(action[0], -1, 1, -np.pi*2, np.pi*2) # roll
-        action[1] = util.map_value(action[1], -1, 1, -np.pi*2, np.pi*2) # pitch
+        action[1] = util.map_value(action[1], -1, 1, -np.pi/2, np.pi/2) # pitch
         action[2] = util.map_value(action[2], -1, 1, -np.pi/2, np.pi/2) # tail
 
-        torque = np.zeros(4)
         torque[0] = self.pd[0].get_torque(action[0],
                                           self.data.qpos[self._joint_qpos_idx["rot1"]], 
                                           self.data.qvel[self._joint_qvel_idx["rot1"]])
@@ -73,14 +90,16 @@ class CatEnv(MujocoEnv, EzPickle):
         torque[3] = self.pd[3].get_torque(action[2],
                                           self.data.qpos[self._joint_qpos_idx["tail"]], 
                                           self.data.qvel[self._joint_qvel_idx["tail"]])
-        
+
         self.do_simulation(torque, self.frame_skip)
 
         observation = self._get_obs()
-        reward = self._get_reward()
+        reward = self._get_reward(action)
         terminated = self._is_terminated()
         truncated = self._is_truncated()
         info = {}
+
+        self.prev_action = action
 
         if self.render_mode == "human":
             self.render()
@@ -89,30 +108,46 @@ class CatEnv(MujocoEnv, EzPickle):
 
     def reset_model(self):
         self.steps = 0
+        self.prev_action = np.zeros_like(self.action_space.shape)
+
         qpos = self.init_qpos.copy()
         qvel = self.init_qvel.copy()
         
         # randomize initial rotation
-        random_quat = np.random.rand(4)
-        random_quat /= np.linalg.norm(random_quat)
-        qpos[3:7] = random_quat
+        # random_quat = np.random.rand(4)
+        # random_quat /= np.linalg.norm(random_quat)
+        # qpos[3:7] = random_quat
+        random_angle = np.random.uniform(-np.pi, np.pi)
+
+        r = R.from_euler("z", random_angle, degrees=False)
+        qpos[3:7] = r.as_quat()
 
         self.set_state(qpos, qvel)
         return self._get_obs()
 
     def _get_obs(self):
+        front_body_pos = self.data.xpos[self._body_idx["front_body"]]
+        rear_body_pos = self.data.xpos[self._body_idx["rear_body"]]
+
         front_body_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_body_quat = self.data.xquat[self._body_idx["rear_body"]]
+
+        qpos = self.data.qpos
+        qvel = self.data.qvel
+        qacc = self.data.qacc
+
+        ctrl = self.data.ctrl
+        step = np.array([self.steps / self.max_steps])
         
         obs = np.concatenate([
-            front_body_quat, 
-            rear_body_quat, 
-            self.data.qpos, 
-            self.data.qvel
+            front_body_pos, rear_body_pos,
+            front_body_quat, rear_body_quat,
+            qpos, qvel, #qacc,
+            ctrl, step
         ])
         return obs
 
-    def _get_reward(self):
+    def _get_reward(self, action):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
         spine1_quat = self.data.xquat[self._body_idx["spine_1"]]
@@ -136,10 +171,17 @@ class CatEnv(MujocoEnv, EzPickle):
         reward_spine1 = (spine1_up[2] + 1) / 2
         reward_spine2 = (spine2_up[2] + 1) / 2
         
-        reward = reward_front*reward_rear*reward_spine1*reward_spine2
-        reward *= np.tanh(self.steps*0.05) # lower the reward weights
+        r_pos = reward_front*reward_rear#*reward_spine1*reward_spine2
+        r_pos *= np.tanh(self.steps*k) # lower the reward weights
 
-        return reward
+        # smoothness reward
+        delta = action - self.prev_action
+        r_sm = np.mean(delta**2)
+
+        # energy consumption reward
+        r_en = np.mean(action**2)
+
+        return w_pos*r_pos + w_sm*r_sm# + w_en*r_en
     
     def _is_terminated(self):
         return False
