@@ -8,11 +8,13 @@ import cat_env.env_util as util
 import mujoco
 import os
 
+np.random.seed(None)
+
 # ---- train parameters ----
 w_pos = 1.0 # pose reward weight
 w_sm = -0.1 # smoothness reward weight
 w_en = -0.1 # energy consumption reward weight
-k = 0.1  # tanh gain param
+k = 0.08  # tanh gain param
 # --------------------------
 
 class CatEnv(MujocoEnv, EzPickle):
@@ -54,10 +56,12 @@ class CatEnv(MujocoEnv, EzPickle):
         self.prev_action = np.zeros_like(action_space.shape)
 
         self.pd = []
+        self.pd.append(util.PDController(0.1, 0.01))
         self.pd.append(util.PDController(1, 0.1))
-        self.pd.append(util.PDController(1, 0.1))
-        self.pd.append(util.PDController(1, 0.1))
-        self.pd.append(util.PDController(1, 0.1))
+        self.pd.append(util.PDController(0.1, 0.01))
+        self.pd.append(util.PDController(0.1, 0.01))
+
+        self.ctrls = []
 
     def step(self, action):
         self.steps += 1
@@ -92,7 +96,7 @@ class CatEnv(MujocoEnv, EzPickle):
                                           self.data.qvel[self._joint_qvel_idx["tail"]])
 
         self.do_simulation(torque, self.frame_skip)
-
+        # self.ctrls.append(action)
         observation = self._get_obs()
         reward = self._get_reward(action)
         terminated = self._is_terminated()
@@ -101,6 +105,8 @@ class CatEnv(MujocoEnv, EzPickle):
 
         self.prev_action = action
 
+        # if terminated or truncated:
+        #     np.save("control.npy", np.array(self.ctrls))
         if self.render_mode == "human":
             self.render()
 
@@ -173,20 +179,20 @@ class CatEnv(MujocoEnv, EzPickle):
         
         r_pos = reward_front*reward_rear#*reward_spine1*reward_spine2
         r_pos *= np.tanh(self.steps*k) # lower the reward weights
+        # r_pos *= (np.tanh(0.05*(self.steps-20)) + 1)/2
 
         # smoothness reward
         delta = action - self.prev_action
         r_sm = np.mean(delta**2)
 
         # energy consumption reward
-        r_en = np.mean(action**2)
+        ctrl = self.data.ctrl
+        r_en = np.mean(ctrl**2)
 
-        return w_pos*r_pos + w_sm*r_sm# + w_en*r_en
+        return w_pos*r_pos + w_sm*r_sm + w_en*r_en
     
     def _is_terminated(self):
         return False
 
     def _is_truncated(self):
         return self.steps >= self.max_steps
-
-
