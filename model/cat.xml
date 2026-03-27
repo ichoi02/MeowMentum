@@ -5,7 +5,7 @@
   </option>
 
   <default>
-    <joint limited="true" damping="0.002" armature="0.0001"/>
+    <joint limited="true" armature="0.000112" damping="0.0013" frictionloss="0.0077"/>
   </default>
 
   <asset>
@@ -32,7 +32,10 @@
         <geom type="cylinder" size="0.03 0.01" pos="0 -0.01 0" euler="1.5708 0 0" material="color1"/>
 
         <body name="spine_2" pos="0.0 0 0">
-          <joint name="pitch" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
+          <joint name="pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" 
+          armature="0.002634" 
+          damping="0.0562" 
+          frictionloss="0.0918" />
           <inertial pos="0 0 0" mass="0.2" diaginertia="0.00007167 0.00009 0.00007167"/>
           <geom type="cylinder" size="0.03 0.01" pos="0 0.01 0" euler="1.5708 0 0" material="color3"/>
 

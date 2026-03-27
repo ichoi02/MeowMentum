@@ -19,7 +19,7 @@ def train():
 
     model.learn(
         total_timesteps=1000000,
-        log_interval=1,
+        log_interval=10,
         progress_bar=True
         )
 
