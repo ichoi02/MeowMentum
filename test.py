@@ -30,7 +30,7 @@ def visualize():
     env = gym.make("Cat-v0")
     model_path = "cat_controller"
 
-    agent = 'teacher'
+    agent = 'student'
     if agent == 'teacher':
         print("Loading teacher policy")
         teacher = PPO.load(model_path)
