@@ -30,7 +30,7 @@ const int M2INA = 7;
 const int M2INB = 8;
 const int M2PWM = 10;
 const int M2EN = 12;
-Encoder enc2(17, 20);
+Encoder enc2(17, 16);
 
 // PWM Settings
 const int PWM_MAX = 1023;
