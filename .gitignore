@@ -1,4 +1,6 @@
 run_logs/
+# Teensy PD_control arduino-cli output (hardware/flash_pd_control_teensy.sh)
+hardware/.pd_teensy_build/
 .DS_Store
 
 # Byte-compiled / optimized / DLL files

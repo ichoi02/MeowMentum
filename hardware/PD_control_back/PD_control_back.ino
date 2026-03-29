@@ -13,16 +13,17 @@ const float M1GEAR = 9.68;
 const float M2GEAR = 46.85; // Fixed: M2 gear ratio
 const int TICKS_PER_REV = 48;
 
-bool MOTOR1_REVERSED = true;
-bool ENCODER1_REVERSED = true;
-bool MOTOR2_REVERSED = false;
-bool ENCODER2_REVERSED = false;
+bool MOTOR1_REVERSED = false;
+bool ENCODER1_REVERSED = false;
+bool MOTOR2_REVERSED = true;
+bool ENCODER2_REVERSED = true;
 
 // Motor 1
 const int M1INA = 2;
 const int M1INB = 4;
-const int M1PWM = 9;
-const int M1EN = 6;
+// NOTE: PWM and EN pin swapped from original design
+const int M1PWM = 6;
+const int M1EN = 9;
 Encoder enc1(13, 14);
 
 // Motor 2
