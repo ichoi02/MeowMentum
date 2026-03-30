@@ -1,4 +1,6 @@
 #include <Encoder.h>
+#include <Wire.h>
+#include <Adafruit_BNO08x.h>
 
 // ==========================================
 // Dual Pololu Motor PD Position Control
@@ -17,8 +19,24 @@
 // ==========================================
 
 const float M1GEAR = 9.68;
-const float M2GEAR = 46.85
+const float M2GEAR = 9.68;
 const int TICKS_PER_REV = 48;
+
+// // Motor 1
+// const int M1INA = 2;
+// const int M1INB = 4;
+// // NOTE: PWM and EN pin swapped from original design
+// const int M1PWM = 6;
+// const int M1EN = 9;
+// Encoder enc1(13, 14);
+
+// // Motor 2
+// const int M2INA = 7;
+// const int M2INB = 8;
+// const int M2PWM = 10;
+// const int M2EN = 12;
+// Encoder enc2(15, 16);
+
 
 // Motor 1
 const int M1INA = 2;
@@ -30,9 +48,13 @@ Encoder enc1(14, 15);
 // Motor 2
 const int M2INA = 7;
 const int M2INB = 8;
-const int M2PWM = 10;
-const int M2EN = 12;
-Encoder enc2(17, 20);
+// NOTE: PWM and EN pin swapped from original design
+const int M2PWM = 12;
+const int M2EN = 10;
+Encoder enc2(17, 16);
+
+Adafruit_BNO08x bno08x;
+sh2_SensorValue_t sensorValue;
 
 // ==========================================
 // 2. HARDWARE CALIBRATION
@@ -48,7 +70,7 @@ Encoder enc2(17, 20);
 bool MOTOR1_REVERSED = true;
 bool ENCODER1_REVERSED = true;
 
-bool MOTOR2_REVERSED = false;
+bool MOTOR2_REVERSED = true;
 bool ENCODER2_REVERSED = false;
 
 // ==========================================
@@ -63,7 +85,7 @@ double Kd = 10.0;
 float deadband = 0.03;
 
 // Minimum PWM to overcome static friction
-int minPWM = 100;
+const int minPWM = 100;
 
 // PWM range for 10-bit resolution
 const int PWM_MAX = 1023;
@@ -79,7 +101,8 @@ const uint32_t PRINT_PERIOD_MS = 50;
 // 4. STATE VARIABLES
 // ==========================================
 
-float targetPos = 0;       // Shared target for both motors
+float targetPos1 = 0;
+float targetPos2 = 0;
 float lastErr1 = 0;
 float lastErr2 = 0;
 
@@ -120,10 +143,21 @@ void setup() {
 
   // Initialize target to current Motor 1 position
   // so the system does not jump on startup.
-  targetPos = readEncoder1();
+  targetPos1 = readEncoder1();
+  targetPos2 = readEncoder2();
 
   lastControlMicros = micros();
   lastPrintMillis = millis();
+
+  // IMU Setup
+  Wire.begin();
+  Wire.setClock(400000);
+  if (!bno08x.begin_I2C(0x4A, &Wire)) {
+    while (1) { delay(100); }
+  }
+  if (!bno08x.enableReport(SH2_ROTATION_VECTOR, 10000)) {
+    while (1) { delay(100); }
+  }
 }
 
 // ==========================================
@@ -147,7 +181,27 @@ void loop() {
   uint32_t nowMillis = millis();
   if ((uint32_t)(nowMillis - lastPrintMillis) >= PRINT_PERIOD_MS) {
     lastPrintMillis = nowMillis;
-    printTelemetry();
+    
+    if (bno08x.getSensorEvent(&sensorValue)) {
+      if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
+        float qr = sensorValue.un.rotationVector.real;
+        float qi = sensorValue.un.rotationVector.i;
+        float qj = sensorValue.un.rotationVector.j;
+        float qk = sensorValue.un.rotationVector.k;
+        //float acc = sensorValue.un.rotationVector.accuracy;
+
+        float angle1 = readEncoder1();
+        float angle2 = readEncoder2();
+
+        Serial.print(qr, 6); Serial.print(",");
+        Serial.print(qi, 6); Serial.print(",");
+        Serial.print(qj, 6); Serial.print(",");
+        Serial.print(qk, 6); Serial.print(",");
+        //Serial.print(acc, 6); Serial.print(",");
+        Serial.print(angle1, 4); Serial.print(",");
+        Serial.println(angle2, 4);
+      }
+    }
   }
 }
 
@@ -164,7 +218,7 @@ void runController(double dt) {
   float currentPos2 = readEncoder2();
 
   // ----- Motor 1 -----
-  float err1 = targetPos - currentPos1;
+  float err1 = targetPos1 - currentPos1;
 
   if (abs(err1) <= deadband) {
     stopMotor1();
@@ -180,7 +234,7 @@ void runController(double dt) {
   }
 
   // ----- Motor 2 -----
-  float err2 = targetPos - currentPos2;
+  float err2 = targetPos2 - currentPos2;
 
   if (abs(err2) <= deadband) {
     stopMotor2();
@@ -204,15 +258,29 @@ void runController(double dt) {
 // ==========================================
 
 void handleSerialInput() {
-  if (Serial.available() > 0) {
-    float newTarget = Serial.parseFloat();
-
-    // Clear remaining characters
-    while (Serial.available() > 0) {
-      Serial.read();
+  if (Serial.available()) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+    
+    if (input == "RESET") {
+      enc1.write(0);
+      enc2.write(0);
+    } 
+    if (input == "START") { // ONLY USE AFTER RESET
+      digitalWrite(M1EN, HIGH);
+      digitalWrite(M2EN, HIGH);
     }
-
-    targetPos = newTarget;
+    if (input == "STOP") {
+      digitalWrite(M1EN, LOW);
+      digitalWrite(M2EN, LOW);
+    }
+    else {
+      int commaIndex = input.indexOf(',');
+      if (commaIndex > 0) {
+        targetPos1 = input.substring(0, commaIndex).toFloat();
+        targetPos2 = input.substring(commaIndex + 1).toFloat();
+      }
+    }
   }
 }
 
@@ -220,20 +288,6 @@ void handleSerialInput() {
 // 9. TELEMETRY
 // ==========================================
 
-void printTelemetry() {
-  float currentPos1 = readEncoder1();
-  float currentPos2 = readEncoder2();
-
-  Serial.print(targetPos);
-  Serial.print(",");
-  Serial.println(currentPos1);
-  // Serial.print(",M2_Pos:");
-  // Serial.println(currentPos2);
-}
-
-// ==========================================
-// 10. ENCODER HELPERS
-// ==========================================
 
 float readEncoder1() {
   long pos = enc1.read();
@@ -295,7 +349,6 @@ void driveMotor2(double speed) {
     digitalWrite(M2INA, LOW);
     digitalWrite(M2INB, HIGH);
   }
-
   analogWrite(M2PWM, pwmVal);
 }
 

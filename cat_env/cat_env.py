@@ -87,9 +87,9 @@ class CatEnv(MujocoEnv, EzPickle):
         torque[3] = self.pd[3].get_torque(action[2],
                                           self.data.qpos[self._joint_qpos_idx["tail"]], 
                                           self.data.qvel[self._joint_qvel_idx["tail"]])
-
+        # print(torque)
         self.do_simulation(torque, self.frame_skip)
-        self.ctrls.append(action)
+        # self.ctrls.append(torque)
         observation = self._get_obs()
         reward = self._get_reward(action)
         terminated = self._is_terminated()
@@ -99,7 +99,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self.prev_action = action
 
         if terminated or truncated:
-            np.save("control.npy", np.array(self.ctrls))
+            # np.save(f"control.npy", np.array(self.ctrls))
             self.ctrls = []
         if self.render_mode == "human":
             self.render()
@@ -121,13 +121,12 @@ class CatEnv(MujocoEnv, EzPickle):
         # qpos[3:7] = random_quat
 
         # random angular velocities
-        random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = np.random.uniform(-0.2, 0.2)
+        self.random_roll = np.random.uniform(-np.pi, np.pi)
+        random_pitch = 0#np.random.uniform(-0.2, 0.2)
 
-        r = R.from_euler("xyz", [random_roll, random_pitch, 0], degrees=False)
+        r = R.from_euler("xyz", [self.random_roll, random_pitch, 0], degrees=False)
         quat_xyzw = r.as_quat()
         qpos[3:7] = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
-
 
         # random roll
         # random_angle = np.random.uniform(-np.pi, np.pi)

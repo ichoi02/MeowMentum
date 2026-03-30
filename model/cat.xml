@@ -60,7 +60,7 @@
 
   <actuator>
     <motor name="motor1" joint="rot1" ctrllimited="true" ctrlrange="-0.17 0.17"/>
-    <motor name="motor2" joint="pitch" ctrllimited="true" ctrlrange="-1.7 1.7"/>
+    <motor name="motor2" joint="pitch" ctrllimited="true" ctrlrange="-0.17 0.17"/>
     <motor name="motor3" joint="rot2" ctrllimited="true" ctrlrange="-0.17 0.17"/>
     <motor name="motor4" joint="tail" ctrllimited="true" ctrlrange="-0.17 0.17"/>
   </actuator>

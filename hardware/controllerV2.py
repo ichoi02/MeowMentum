@@ -46,27 +46,8 @@ SN_BACK  = "18452630"
 BAUD_RATE = 115200
 LOOP_HZ = 50
 
-# --debug: track a sine/cos joint reference within ±DEBUG_JOINT_SWING_DEG of encoder zero (needs tune if weak/oscillatory).
-DEBUG_JOINT_SWING_DEG = 30.0
-DEBUG_TRACK_KP = 350.0
-DEBUG_TRACK_FREQ_HZ = 0.5
-
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
-
-
-def _debug_encoder_limit_breached(front, back, lim_rad):
-    """Returns (board_name, joint_name, angle_rad) if outside ±lim_rad, else None."""
-    checks = (
-        ("front", "m1", front.m1_rad),
-        ("front", "m2", front.m2_rad),
-        ("back", "m1", back.m1_rad),
-        ("back", "m2", back.m2_rad),
-    )
-    for board, joint, r in checks:
-        if abs(r) > lim_rad:
-            return board, joint, r
-    return None
 
 
 class TeensyInterface:
@@ -103,7 +84,6 @@ class TeensyInterface:
                 pass
         self._rx_remainder = b""
         self.quat = [1.0, 0.0, 0.0, 0.0] 
-        self.accuracy = 0.0
         self.m1_rad = 0.0
         self.m2_rad = 0.0
 
@@ -111,6 +91,23 @@ class TeensyInterface:
         """Sends the command to zero out the hardware encoder counts."""
         try:
             self.ser.write(b"RESET\n")
+            print("Reset encoders.")
+        except OSError as e:
+            if self._is_serial_gone(e):
+                self.reopen_serial()
+
+    def stop_all_motors(self):
+        try:
+            self.ser.write(b"STOP\n")
+            print("Stopped all motors.")
+        except OSError as e:
+            if self._is_serial_gone(e):
+                self.reopen_serial()
+
+    def start_all_motors(self):
+        try:
+            self.ser.write(b"START\n")
+            print("Started all motors.")
         except OSError as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
@@ -201,6 +198,10 @@ def main():
     back = TeensyInterface(path_back, "Back")
     time.sleep(1) # Wait for serial connection to establish
 
+    # Stop all motors
+    front.stop_all_motors()
+    back.stop_all_motors()
+
     # --- ZERO THE ENCODERS ---
     print("Zeroing motor encoders...")
     front.reset_encoders()
@@ -211,33 +212,86 @@ def main():
     front.flush_input_safe()
     back.flush_input_safe()
 
-    if not args.debug:
-        print("Loading ONNX Model...")
-        import onnxruntime as ort
-        try:
-            ort.set_default_logger_severity(3)
-        except (AttributeError, TypeError):
-            pass
-        # FIXME: Replace with your actual model filename if different
-        ort_session = ort.InferenceSession("cat_controller.onnx")
+    print("Press any key to start.")
+    input()
+    front.start_all_motors()
+    back.start_all_motors()
+
+    # if not args.debug:
+    #     print("Loading ONNX Model...")
+    #     import onnxruntime as ort
+    #     try:
+    #         ort.set_default_logger_severity(3)
+    #     except (AttributeError, TypeError):
+    #         pass
+    #     # FIXME: Replace with your actual model filename if different
+    #     ort_session = ort.InferenceSession("cat_controller.onnx")
     
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
-    
+    log = []
+
+    print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
+    try:
+        while(True): # FIXME: need to limit running time
+            loop_start = time.time()
+            t = loop_start - start_time
+
+            front.update_sensor_data()
+            back.update_sensor_data()
+
+            if args.debug:
+                # assumes input format "[motor num] [target angle]"
+                debug_input = input().split()
+                debug_input = debug_input
+                motor_num = int(debug_input[0])
+                target_angle = float(debug_input[1])
+                action = [0, 0, 0, 0]
+                action[motor_num - 1] = target_angle
+                print(action)
+            # TODO: add onnx control
+
+            front.set_motors(action[0], action[1])
+            back.set_motors(action[2], action[3])
+
+            log.append([
+                round(t, 4),
+                front.quat[0], front.quat[1], front.quat[2], front.quat[3],
+                front.m1_rad, front.m2_rad,
+                action[0], action[1],
+                back.quat[0], back.quat[1], back.quat[2], back.quat[3],
+                back.m1_rad, back.m2_rad,
+                action[2], action[3],
+            ])
+
+            # Enforce timing
+            elapsed = time.time() - loop_start
+            if elapsed < loop_period:
+                time.sleep(loop_period - elapsed)
+            else:
+                print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
+
+    except KeyboardInterrupt:
+        print("\nStopping motors and exiting...")
+        front.stop_all_motors()
+        back.stop_all_motors()
+        if log:
+            filename = f"telemetry_{int(time.time())}.csv"
+            print(f"Saving {len(log)} records to {filename}...")
+            with open(filename, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2", 
+                                 "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2"])
+                writer.writerows(log)
+            print("Done.")
+
+"""
     # --- SETUP CSV LOGGING ---
     log_filename = f"telemetry_log_{int(time.time())}.csv"
     print(f"Logging telemetry to: {log_filename}")
     
     with open(log_filename, 'w', newline='', buffering=io.DEFAULT_BUFFER_SIZE * 8) as csvfile:
         csv_writer = csv.writer(csvfile)
-        headers = [
-            "timestamp_s",
-            "front_qr", "front_qi", "front_qj", "front_qk",
-            "front_m1_rad", "front_m2_rad", "front_m1_cmd", "front_m2_cmd",
-            "back_qr", "back_qi", "back_qj", "back_qk",
-            "back_m1_rad", "back_m2_rad", "back_m1_cmd", "back_m2_cmd",
-            "front_m1_deg", "front_m2_deg", "back_m1_deg", "back_m2_deg",
-        ]
         csv_writer.writerow(headers)
 
         print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
@@ -328,6 +382,6 @@ def main():
             front.set_motors(0, 0)
             back.set_motors(0, 0)
             time.sleep(0.1)
-
+"""
 if __name__ == "__main__":
     main()
