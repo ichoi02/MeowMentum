@@ -3,19 +3,7 @@
 #include <Adafruit_BNO08x.h>
 
 // ==========================================
-// Dual Pololu Motor PD Position Control
-// Teensy 4.0 + VNH5019 + Quadrature Encoders
-// ==========================================
-//
-// Notes:
-// - This version fixes timing initialization, print timing, and reversal handling.
-// - It uses a fixed control rate for more stable PD behavior.
-// - Each motor can have independent motor-direction reversal and encoder-sign reversal.
-// - Send a target encoder tick count over Serial Monitor and press Enter.
-// - Serial Plotter output is also included.
-//
-// ==========================================
-// 1. CONST DEFINITIONS
+// CONST DEFINITIONS
 // ==========================================
 
 const float M1GEAR = 9.68;
@@ -57,15 +45,8 @@ Adafruit_BNO08x bno08x;
 sh2_SensorValue_t sensorValue;
 
 // ==========================================
-// 2. HARDWARE CALIBRATION
+// HARDWARE CALIBRATION
 // ==========================================
-// Flip these if needed after testing.
-//
-// MOTORx_REVERSED flips the commanded motor direction.
-// ENCx_REVERSED flips the encoder sign.
-//
-// If a motor runs away even though the encoder count changes,
-// one of these is likely wrong.
 
 bool MOTOR1_REVERSED = true;
 bool ENCODER1_REVERSED = true;
@@ -74,7 +55,7 @@ bool MOTOR2_REVERSED = true;
 bool ENCODER2_REVERSED = false;
 
 // ==========================================
-// 3. CONTROL SETTINGS
+// CONTROL SETTINGS
 // ==========================================
 
 // PD gains
@@ -98,7 +79,7 @@ const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
 const uint32_t PRINT_PERIOD_MS = 50;
 
 // ==========================================
-// 4. STATE VARIABLES
+// STATE VARIABLES
 // ==========================================
 
 float targetPos1 = 0;
@@ -110,7 +91,7 @@ uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
 // ==========================================
-// 5. SETUP
+// SETUP
 // ==========================================
 
 void setup() {
@@ -161,7 +142,7 @@ void setup() {
 }
 
 // ==========================================
-// 6. MAIN LOOP
+// MAIN LOOP
 // ==========================================
 
 void loop() {
@@ -285,7 +266,7 @@ void handleSerialInput() {
 }
 
 // ==========================================
-// 9. TELEMETRY
+// TELEMETRY
 // ==========================================
 
 
@@ -308,7 +289,7 @@ float readEncoder2() {
 }
 
 // ==========================================
-// 11. MOTOR DRIVE FUNCTIONS
+// MOTOR DRIVE FUNCTIONS
 // ==========================================
 
 void driveMotor1(double speed) {

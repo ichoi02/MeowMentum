@@ -37,7 +37,7 @@ sh2_SensorValue_t sensorValue;
 bool MOTOR1_REVERSED = true;
 bool ENCODER1_REVERSED = true;
 
-bool MOTOR2_REVERSED = true;
+bool MOTOR2_REVERSED = false;
 bool ENCODER2_REVERSED = false;
 
 // ==========================================
