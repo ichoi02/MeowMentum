@@ -38,6 +38,7 @@ import io
 import argparse
 import numpy as np
 import csv
+import threading
 
 # --- CONFIGURATION ---
 SN_FRONT = "18451300" 
@@ -49,6 +50,7 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
+debug_action = [0.0, 0.0, 0.0, 0.0]
 
 class TeensyInterface:
     def __init__(self, port_path, name):
@@ -91,7 +93,7 @@ class TeensyInterface:
         """Sends the command to zero out the hardware encoder counts."""
         try:
             self.ser.write(b"RESET\n")
-            print("Reset encoders.")
+            print(f"{self.name}: Reset encoders.")
         except OSError as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
@@ -99,7 +101,7 @@ class TeensyInterface:
     def stop_all_motors(self):
         try:
             self.ser.write(b"STOP\n")
-            print("Stopped all motors.")
+            print(f"{self.name}: Stopping otors.")
         except OSError as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
@@ -107,7 +109,7 @@ class TeensyInterface:
     def start_all_motors(self):
         try:
             self.ser.write(b"START\n")
-            print("Started all motors.")
+            print(f"{self.name}: Starting motors.")
         except OSError as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
@@ -163,7 +165,7 @@ class TeensyInterface:
 
     def set_motors(self, m1, m2):
         """Sends target motor angles (2dp) to Teensy. Assumes format: 'M1,M2\n'"""
-        cmd = f"M{m1:.2f},{m2:.2f}\n"
+        cmd = f"{m1:.2f},{m2:.2f}\n"
         try:
             self.ser.write(cmd.encode('utf-8'))
         except OSError as e:
@@ -176,6 +178,19 @@ def get_port_by_sn(serial_number):
         if port.serial_number == serial_number:
             return port.device
     return None
+
+def keyboard_input_thread():
+    global debug_action
+    while True:
+        try:
+            user_in = input().split()
+            if len(user_in) == 2:
+                motor_num = int(user_in[0])
+                target_angle = float(user_in[1])
+                debug_action[motor_num - 1] = target_angle
+                print(f"Updated Motor {motor_num} to {target_angle}")
+        except Exception as e:
+            print(f"Invalid input. Try again. ({e})")
 
 def main():
     parser = argparse.ArgumentParser(description="Teensy Control Loop with Telemetry Logging")
@@ -196,6 +211,7 @@ def main():
     print("Connecting to boards...")
     front = TeensyInterface(path_front, "Front")
     back = TeensyInterface(path_back, "Back")
+    print(f"{path_front}, {path_back}")
     time.sleep(1) # Wait for serial connection to establish
 
     # Stop all motors
@@ -230,6 +246,10 @@ def main():
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
     log = []
+    
+    if args.debug:
+        print("Debug mode initiated: enter '[motor num] [target angle]'")
+        threading.Thread(target=keyboard_input_thread, daemon=True).start()
 
     print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
     try:
@@ -240,16 +260,13 @@ def main():
             front.update_sensor_data()
             back.update_sensor_data()
 
+            action = [0, 0, 0, 0]
+
             if args.debug:
-                # assumes input format "[motor num] [target angle]"
-                debug_input = input().split()
-                debug_input = debug_input
-                motor_num = int(debug_input[0])
-                target_angle = float(debug_input[1])
-                action = [0, 0, 0, 0]
-                action[motor_num - 1] = target_angle
-                print(action)
-            # TODO: add onnx control
+                action = list(debug_action) 
+            else:
+                # TODO: add onnx control here
+                pass
 
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
@@ -272,7 +289,7 @@ def main():
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
 
     except KeyboardInterrupt:
-        print("\nStopping motors and exiting...")
+        print("\nExiting...")
         front.stop_all_motors()
         back.stop_all_motors()
         if log:

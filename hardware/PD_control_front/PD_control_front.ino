@@ -2,26 +2,9 @@
 #include <Wire.h>
 #include <Adafruit_BNO08x.h>
 
-
 const float M1GEAR = 9.68;
 const float M2GEAR = 9.68;
 const int TICKS_PER_REV = 48;
-
-// // Motor 1
-// const int M1INA = 2;
-// const int M1INB = 4;
-// // NOTE: PWM and EN pin swapped from original design
-// const int M1PWM = 6;
-// const int M1EN = 9;
-// Encoder enc1(13, 14);
-
-// // Motor 2
-// const int M2INA = 7;
-// const int M2INB = 8;
-// const int M2PWM = 10;
-// const int M2EN = 12;
-// Encoder enc2(15, 16);
-
 
 // Motor 1
 const int M1INA = 2;
