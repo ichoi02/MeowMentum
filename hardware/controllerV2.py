@@ -207,7 +207,7 @@ class TeensyInterface:
         aligned_wxyz[:, 0] = aligned_xyzw[:, 3]      # Move w to the front
         aligned_wxyz[:, 1:4] = aligned_xyzw[:, 0:3]  # Move x, y, z
         
-        return aligned_wxyz
+        return aligned_wxyz.squeeze(0)
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
