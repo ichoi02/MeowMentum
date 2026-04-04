@@ -167,10 +167,7 @@ class TeensyInterface:
             if len(parts) == 6:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
-                    if self.name == "Front":
-                        self.quat = self.rotate_quat(self.quat, 0, 0, 90)
-                    elif self.name == "Back":
-                        self.quat = self.rotate_quat(self.quat, 180, 0, 180)
+                    self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                 except ValueError:
@@ -186,11 +183,31 @@ class TeensyInterface:
                 print(f"{self.name}: serial EIO in set_motors; reopening…")
                 self.reopen_serial()
     
-    def rotate_quat(self, q, x, y, z):
-        base_rot = R.from_quat(q, scalar_first=True)
-        new_rot = R.from_euler('xyz', [x, y, z], degrees=True)
-        combined_rot = base_rot * new_rot
-        return combined_rot.as_quat(scalar_first=True)
+    def align_imu_quaternions(self, quats_wxyz, imu_type):
+        quats_xyzw = np.empty_like(quats_wxyz)
+        quats_xyzw[:, 0:3] = quats_wxyz[:, 1:4]  # Move x, y, z
+        quats_xyzw[:, 3] = quats_wxyz[:, 0]      # Move w to the end
+        
+        r_raw = R.from_quat(quats_xyzw)
+        
+        # 2. Define the alignment rotations
+        if imu_type == 'Front':
+            r_align = R.from_euler('z', -90, degrees=True)
+            
+        elif imu_type == 'Back':
+            axis = np.array([1, -1, 0])
+            axis_normalized = axis / np.linalg.norm(axis)
+            r_align = R.from_rotvec(np.pi * axis_normalized)
+            
+        r_global = r_raw * r_align
+        
+        aligned_xyzw = r_global.as_quat()
+        
+        aligned_wxyz = np.empty_like(aligned_xyzw)
+        aligned_wxyz[:, 0] = aligned_xyzw[:, 3]      # Move w to the front
+        aligned_wxyz[:, 1:4] = aligned_xyzw[:, 0:3]  # Move x, y, z
+        
+        return aligned_wxyz
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():

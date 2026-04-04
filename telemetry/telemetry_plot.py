@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Read the data into a Pandas DataFrame
-df = pd.read_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775080110.csv")
+df = pd.read_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775333675.csv")
 
 # Create the plot
 plt.figure(figsize=(10, 6))

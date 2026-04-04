@@ -93,6 +93,7 @@ def visualize():
     with mujoco.viewer.launch_passive(model, data) as viewer:
         viewer.cam.lookat[:] = [0, 0, 3]
         viewer.cam.distance = 2.0
+        viewer.cam.azimuth = 90
         
         for step in range(num_steps):
             if not viewer.is_running():
@@ -102,7 +103,7 @@ def visualize():
             data.qpos[0:3] = [0, 0, 3] 
             
             # Root orientation: quat - (w, x, y, z)
-            data.qpos[3:7] = telemetry["rear_quat"][step]
+            data.qpos[3:7] = telemetry["front_quat"][step]
             
             # Joint angles
             data.qpos[joint_qpos_idx["rot1"]] = telemetry["rot1"][step]
