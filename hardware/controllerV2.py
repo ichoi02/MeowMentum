@@ -167,7 +167,10 @@ class TeensyInterface:
             if len(parts) == 6:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
-                    self.quat = self.rotate_quat(self.quat, 0, 0, 90)
+                    if self.name == "Front":
+                        self.quat = self.rotate_quat(self.quat, 0, 0, 90)
+                    elif self.name == "Back":
+                        self.quat = self.rotate_quat(self.quat, 180, 0, 180)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                 except ValueError:
@@ -234,9 +237,9 @@ def main():
     front.stop_all_motors()
     back.stop_all_motors()
 
-    front.reboot_teensy()
-    back.reboot_teensy()
-    time.sleep(1)
+    # front.reboot_teensy()
+    # back.reboot_teensy()
+    # time.sleep(1)
 
     # --- ZERO THE ENCODERS ---
     print("Zeroing motor encoders...")
@@ -313,7 +316,7 @@ def main():
         front.stop_all_motors()
         back.stop_all_motors()
         if log:
-            filename = f"telemetry_{int(time.time())}.csv"
+            filename = f"telemetry/telemetry_{int(time.time())}.csv"
             print(f"Saving {len(log)} records to {filename}...")
             with open(filename, 'w', newline='') as f:
                 writer = csv.writer(f)
@@ -322,103 +325,5 @@ def main():
                 writer.writerows(log)
             print("Done.")
 
-"""
-    # --- SETUP CSV LOGGING ---
-    log_filename = f"telemetry_log_{int(time.time())}.csv"
-    print(f"Logging telemetry to: {log_filename}")
-    
-    with open(log_filename, 'w', newline='', buffering=io.DEFAULT_BUFFER_SIZE * 8) as csvfile:
-        csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(headers)
-
-        print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
-        try:
-            while True:
-                loop_start = time.time()
-                t = loop_start - start_time
-
-                front.update_sensor_data()
-                back.update_sensor_data()
-
-                # --- 1. Control Logic ---
-                if args.debug:
-                    lim = math.radians(DEBUG_JOINT_SWING_DEG)
-                    breach = _debug_encoder_limit_breached(front, back, lim)
-                    if breach is not None:
-                        b, j, r = breach
-                        print(
-                            f"DEBUG safety stop: {b} {j} = {math.degrees(r):.2f}° "
-                            f"(limit ±{DEBUG_JOINT_SWING_DEG:g}°); stopping motors and exiting."
-                        )
-                        front.set_motors(0, 0)
-                        back.set_motors(0, 0)
-                        time.sleep(0.1)
-                        return
-
-                    w = 2 * math.pi * DEBUG_TRACK_FREQ_HZ
-                    target_m1 = lim * math.sin(w * t)
-                    target_m2 = lim * math.cos(w * t)
-                    kp = DEBUG_TRACK_KP
-                    m1_cmd = kp * (target_m1 - front.m1_rad)
-                    m2_cmd = kp * (target_m2 - front.m2_rad)
-                    m1b_cmd = kp * (target_m1 - back.m1_rad)
-                    m2b_cmd = kp * (target_m2 - back.m2_rad)
-
-                    action = [m1_cmd, m2_cmd, m1b_cmd, m2b_cmd]
-
-                    front.set_motors(action[0], action[1])
-                    back.set_motors(action[2], action[3])
-
-                else:
-                    # FIXME: Adjust state array based on your actual ONNX model architecture requirements
-                    state = np.array(front.quat + [front.m1_rad, front.m2_rad] + 
-                                     back.quat + [back.m1_rad, back.m2_rad], 
-                                     dtype=np.float32).reshape(1, -1)
-                    
-                    # FIXME: Ensure "input" matches your ONNX model's exact input node name
-                    action = ort_session.run(None, {"input": state})[0][0] 
-                    
-                    front.set_motors(action[0], action[1])
-                    back.set_motors(action[2], action[3])
-
-                # --- 2. Telemetry Logging ---
-                log_row = [
-                    round(t, 4),
-                    front.quat[0],
-                    front.quat[1],
-                    front.quat[2],
-                    front.quat[3],
-                    front.m1_rad,
-                    front.m2_rad,
-                    action[0],
-                    action[1],
-                    back.quat[0],
-                    back.quat[1],
-                    back.quat[2],
-                    back.quat[3],
-                    back.m1_rad,
-                    back.m2_rad,
-                    action[2],
-                    action[3],
-                    round(math.degrees(front.m1_rad), 6),
-                    round(math.degrees(front.m2_rad), 6),
-                    round(math.degrees(back.m1_rad), 6),
-                    round(math.degrees(back.m2_rad), 6),
-                ]
-                csv_writer.writerow(log_row)
-
-                # --- 3. Enforce Timing ---
-                elapsed = time.time() - loop_start
-                if elapsed < loop_period:
-                    time.sleep(loop_period - elapsed)
-                else:
-                    print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
-
-        except KeyboardInterrupt:
-            print("\nStopping motors and exiting...")
-            front.set_motors(0, 0)
-            back.set_motors(0, 0)
-            time.sleep(0.1)
-"""
 if __name__ == "__main__":
     main()

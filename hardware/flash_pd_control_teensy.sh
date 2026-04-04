@@ -295,7 +295,11 @@ for line in "${FLASH_ORDER[@]}"; do
   echo ">>> Step $step: ${role} (USB serial ${serial}) <<<"
   echo "    Firmware: $(basename "$HEX")"
   echo "    Press the program button on THIS board only (or put only it in bootloader)."
-  teensy_loader_cli --mcu="$MCU" -w -v "$HEX"
+  if ! teensy_loader_cli --mcu="$MCU" -w -v "$HEX"; then
+    echo "USB error, retrying..."
+    sleep 1
+    teensy_loader_cli --mcu="$MCU" -w -v "$HEX"
+  fi
   echo ""
   ((step++)) || true
 done
