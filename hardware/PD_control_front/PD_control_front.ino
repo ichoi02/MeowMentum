@@ -77,8 +77,14 @@ float lastErr2 = 0;
 uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
-// global IMU
+// global IMU (Adjusted output)
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
+
+// Raw IMU readings
+float raw_qr = 1.0, raw_qi = 0.0, raw_qj = 0.0, raw_qk = 0.0;
+
+// IMU Zeroing Offset
+float offset_qr = 1.0, offset_qi = 0.0, offset_qj = 0.0, offset_qk = 0.0;
 
 // ==========================================
 // 5. SETUP
@@ -141,10 +147,18 @@ void loop() {
 
   if (bno08x.getSensorEvent(&sensorValue)) {
     if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
-      imu_qr = sensorValue.un.rotationVector.real;
-      imu_qi = sensorValue.un.rotationVector.i;
-      imu_qj = sensorValue.un.rotationVector.j;
-      imu_qk = sensorValue.un.rotationVector.k;
+      // 1. Get raw readings
+      raw_qr = sensorValue.un.rotationVector.real;
+      raw_qi = sensorValue.un.rotationVector.i;
+      raw_qj = sensorValue.un.rotationVector.j;
+      raw_qk = sensorValue.un.rotationVector.k;
+
+      // 2. Apply the offset using Quaternion Multiplication
+      // q_out = q_offset * q_raw
+      imu_qr = offset_qr * raw_qr - offset_qi * raw_qi - offset_qj * raw_qj - offset_qk * raw_qk;
+      imu_qi = offset_qr * raw_qi + offset_qi * raw_qr + offset_qj * raw_qk - offset_qk * raw_qj;
+      imu_qj = offset_qr * raw_qj - offset_qi * raw_qk + offset_qj * raw_qr + offset_qk * raw_qi;
+      imu_qk = offset_qr * raw_qk + offset_qi * raw_qj - offset_qj * raw_qi + offset_qk * raw_qr;
     }
   }
 
@@ -242,10 +256,12 @@ void handleSerialInput() {
       digitalWrite(M1EN, LOW);
       digitalWrite(M2EN, LOW);
     }
-    else if (input == "REBOOT") {
-      Serial.println("Rebooting...");
-      delay(100);
-      SCB_AIRCR = 0x05FA0004; 
+    else if (input == "RESET_IMU") {
+      offset_qr = raw_qr;
+      offset_qi = -raw_qi;
+      offset_qj = -raw_qj;
+      offset_qk = -raw_qk;
+      Serial.println("IMU zeroed.");
     }
     else {
       int commaIndex = input.indexOf(',');

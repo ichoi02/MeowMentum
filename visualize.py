@@ -83,7 +83,7 @@ def visualize():
     }
 
     # Load telemetry
-    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775333675.csv")
+    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775337189.csv")
     num_steps = len(telemetry["front_quat"])
     fps = 100
     
@@ -94,6 +94,7 @@ def visualize():
         viewer.cam.lookat[:] = [0, 0, 3]
         viewer.cam.distance = 2.0
         viewer.cam.azimuth = 90
+        viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD
         
         for step in range(num_steps):
             if not viewer.is_running():
