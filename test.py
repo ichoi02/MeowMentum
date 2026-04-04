@@ -60,7 +60,7 @@ def visualize():
         viewer.cam.elevation = -20
         viewer.cam.azimuth = 90
 
-        slow = 0.25
+        slow = 1.0
 
         try:
             while viewer.is_running():

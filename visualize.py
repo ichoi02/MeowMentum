@@ -83,7 +83,7 @@ def visualize():
     }
 
     # Load telemetry
-    telemetry = load_telemetry_data()
+    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775332381.csv")
     num_steps = len(telemetry["front_quat"])
     fps = 100
     

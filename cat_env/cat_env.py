@@ -165,8 +165,8 @@ class CatEnv(MujocoEnv, EzPickle):
         qvel = self.init_qvel.copy()
 
         # randomize initial orientation
-        self.random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = np.random.uniform(-np.pi/4, np.pi/4)
+        self.random_roll = 0#np.random.uniform(-np.pi, np.pi)
+        random_pitch = 0#np.random.uniform(-np.pi/4, np.pi/4)
 
         # Set initial rot/pos
         r = R.from_euler("xyz", [self.random_roll, random_pitch, 0], degrees=False)
@@ -204,8 +204,8 @@ class CatEnv(MujocoEnv, EzPickle):
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
 
         # rotation matricies
-        r_front = R.from_quat(front_quat[[1, 2, 3, 0]])
-        r_rear = R.from_quat(rear_quat[[1, 2, 3, 0]])
+        r_front = R.from_quat(front_quat, scalar_first=True)
+        r_rear = R.from_quat(rear_quat, scalar_first=True)
 
         # transform local z vectors to global
         front_up = -r_front.apply([0, 0, 1])
