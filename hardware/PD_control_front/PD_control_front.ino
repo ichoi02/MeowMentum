@@ -38,8 +38,8 @@ sh2_SensorValue_t sensorValue;
 bool MOTOR1_REVERSED = true;
 bool ENCODER1_REVERSED = true;
 
-bool MOTOR2_REVERSED = true;
-bool ENCODER2_REVERSED = false;
+bool MOTOR2_REVERSED = false;
+bool ENCODER2_REVERSED = true;
 
 // ==========================================
 // 3. CONTROL SETTINGS
@@ -234,13 +234,18 @@ void handleSerialInput() {
       enc1.write(0);
       enc2.write(0);
     } 
-    if (input == "START") { // ONLY USE AFTER RESET
+    else if (input == "START") { // ONLY USE AFTER RESET
       digitalWrite(M1EN, HIGH);
       digitalWrite(M2EN, HIGH);
     }
-    if (input == "STOP") {
+    else if (input == "STOP") {
       digitalWrite(M1EN, LOW);
       digitalWrite(M2EN, LOW);
+    }
+    else if (input == "REBOOT") {
+      Serial.println("Rebooting...");
+      delay(100);
+      SCB_AIRCR = 0x05FA0004; 
     }
     else {
       int commaIndex = input.indexOf(',');

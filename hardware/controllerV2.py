@@ -1,4 +1,5 @@
 import os
+from scipy.spatial.transform import Rotation as R
 
 # Edge / Pi: ONNX probes GPU on load; keep stderr quiet (4 = fatal in typical ORT builds).
 os.environ.setdefault("ORT_LOG_SEVERITY_LEVEL", "4")
@@ -98,6 +99,14 @@ class TeensyInterface:
             if self._is_serial_gone(e):
                 self.reopen_serial()
 
+    def reboot_teensy(self):
+        try:
+            self.ser.write(b"REBOOT\n")
+            print(f"{self.name}: Reboot.")
+        except OSError as e:
+            if self._is_serial_gone(e):
+                self.reopen_serial()
+
     def stop_all_motors(self):
         try:
             self.ser.write(b"STOP\n")
@@ -158,6 +167,7 @@ class TeensyInterface:
             if len(parts) == 6:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
+                    self.quat = self.rotate_quat(self.quat, 0, 0, 90)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                 except ValueError:
@@ -172,6 +182,12 @@ class TeensyInterface:
             if self._is_serial_gone(e):
                 print(f"{self.name}: serial EIO in set_motors; reopening…")
                 self.reopen_serial()
+    
+    def rotate_quat(self, q, x, y, z):
+        base_rot = R.from_quat(q, scalar_first=True)
+        new_rot = R.from_euler('xyz', [x, y, z], degrees=True)
+        combined_rot = base_rot * new_rot
+        return combined_rot.as_quat(scalar_first=True)
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
@@ -217,6 +233,10 @@ def main():
     # Stop all motors
     front.stop_all_motors()
     back.stop_all_motors()
+
+    front.reboot_teensy()
+    back.reboot_teensy()
+    time.sleep(1)
 
     # --- ZERO THE ENCODERS ---
     print("Zeroing motor encoders...")
