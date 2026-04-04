@@ -76,12 +76,16 @@ float lastErr2 = 0;
 uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
+// global IMU
+float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
+
 // ==========================================
 // 5. SETUP
 // ==========================================
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTimeout(5);
 
   // Motor 1 pins
   pinMode(M1INA, OUTPUT);
@@ -134,8 +138,16 @@ void setup() {
 void loop() {
   handleSerialInput();
 
-  uint32_t nowMicros = micros();
+  if (bno08x.getSensorEvent(&sensorValue)) {
+    if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
+      imu_qr = sensorValue.un.rotationVector.real;
+      imu_qi = sensorValue.un.rotationVector.i;
+      imu_qj = sensorValue.un.rotationVector.j;
+      imu_qk = sensorValue.un.rotationVector.k;
+    }
+  }
 
+  uint32_t nowMicros = micros();
   // Fixed-rate control loop
   if ((uint32_t)(nowMicros - lastControlMicros) >= CONTROL_PERIOD_US) {
     double dt = (nowMicros - lastControlMicros) / 1000000.0;
@@ -144,31 +156,19 @@ void loop() {
     runController(dt);
   }
 
-  // Fixed-rate telemetry
   uint32_t nowMillis = millis();
   if ((uint32_t)(nowMillis - lastPrintMillis) >= PRINT_PERIOD_MS) {
     lastPrintMillis = nowMillis;
     
-    if (bno08x.getSensorEvent(&sensorValue)) {
-      if (sensorValue.sensorId == SH2_ROTATION_VECTOR) {
-        float qr = sensorValue.un.rotationVector.real;
-        float qi = sensorValue.un.rotationVector.i;
-        float qj = sensorValue.un.rotationVector.j;
-        float qk = sensorValue.un.rotationVector.k;
-        //float acc = sensorValue.un.rotationVector.accuracy;
+    float angle1 = readEncoder1();
+    float angle2 = readEncoder2();
 
-        float angle1 = readEncoder1();
-        float angle2 = readEncoder2();
-
-        Serial.print(qr, 6); Serial.print(",");
-        Serial.print(qi, 6); Serial.print(",");
-        Serial.print(qj, 6); Serial.print(",");
-        Serial.print(qk, 6); Serial.print(",");
-        //Serial.print(acc, 6); Serial.print(",");
-        Serial.print(angle1, 4); Serial.print(",");
-        Serial.println(angle2, 4);
-      }
-    }
+    Serial.print(imu_qr, 6); Serial.print(",");
+    Serial.print(imu_qi, 6); Serial.print(",");
+    Serial.print(imu_qj, 6); Serial.print(",");
+    Serial.print(imu_qk, 6); Serial.print(",");
+    Serial.print(angle1, 4); Serial.print(",");
+    Serial.println(angle2, 4);
   }
 }
 
