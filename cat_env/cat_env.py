@@ -12,13 +12,13 @@ np.random.seed(None)
 
 # ---- train parameters ----
 w_pos = 1.0 # pose reward weight
-w_sm = -0.1 # smoothness reward weight
-w_en = -0.1 # energy consumption reward weight
-k = 0.08  # tanh gain param
+w_sm = -0.5 # smoothness penalty weight
+w_en = -5.0 # energy penalty weight
+k = 0.1  # tanh gain param
 # --------------------------
 
 class CatEnv(MujocoEnv, EzPickle):
-    metadata = {"render_modes": ["human", "rgb_array", "depth_array"], "render_fps": 100}
+    metadata = {"render_modes": ["human", "rgb_array", "depth_array"], "render_fps": 50}
 
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
@@ -29,7 +29,7 @@ class CatEnv(MujocoEnv, EzPickle):
         MujocoEnv.__init__(
             self,
             model_path=model_path,
-            frame_skip=1,
+            frame_skip=20,
             observation_space=observation_space,
             default_camera_config={"distance": 3.0, "lookat": np.array([0.0, 0.0, 2])},
             render_mode=render_mode
@@ -58,14 +58,14 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # Initialize variables
         self.steps = 0
-        self.max_steps = 75
+        self.max_steps = 37
         self.prev_action = np.zeros_like(action_space.shape)
 
         self.pd = []
-        self.pd.append(util.PDController(1, 0.1))
-        self.pd.append(util.PDController(10, 1))
-        self.pd.append(util.PDController(1, 0.1))
-        self.pd.append(util.PDController(1, 0.1))
+        self.pd.append(util.PDController(2.0, 0.2))
+        self.pd.append(util.PDController(20.0, 2.0))
+        self.pd.append(util.PDController(1.0, 0.1))
+        self.pd.append(util.PDController(1.0, 0.1))
 
         self.ctrls = []
 
@@ -86,27 +86,34 @@ class CatEnv(MujocoEnv, EzPickle):
         executed_action[1] = util.map_value(executed_action[1], -1, 1, -np.pi/2, np.pi/2) # pitch
         executed_action[2] = util.map_value(executed_action[2], -1, 1, -np.pi/2, np.pi/2) # tail
 
-        norm_torque = np.zeros(4)
+        for _ in range(self.frame_skip):
+            norm_torque = np.zeros(4)
 
-        norm_torque[0] = self.pd[0].get_torque(executed_action[0],
-                                          self.data.qpos[self._joint_qpos_idx["rot1"]], 
-                                          self.data.qvel[self._joint_qvel_idx["rot1"]])
-        norm_torque[1] = self.pd[1].get_torque(executed_action[1],
-                                          self.data.qpos[self._joint_qpos_idx["pitch"]], 
-                                          self.data.qvel[self._joint_qvel_idx["pitch"]])
-        norm_torque[2] = self.pd[2].get_torque(-executed_action[0],
-                                          self.data.qpos[self._joint_qpos_idx["rot2"]], 
-                                          self.data.qvel[self._joint_qvel_idx["rot2"]])
-        norm_torque[3] = self.pd[3].get_torque(executed_action[2],
-                                          self.data.qpos[self._joint_qpos_idx["tail"]], 
-                                          self.data.qvel[self._joint_qvel_idx["tail"]])
+            # Recalculate torque based on CURRENT micro-state
+            norm_torque[0] = self.pd[0].get_torque(executed_action[0],
+                                              self.data.qpos[self._joint_qpos_idx["rot1"]], 
+                                              self.data.qvel[self._joint_qvel_idx["rot1"]])
+            norm_torque[1] = self.pd[1].get_torque(executed_action[1],
+                                              self.data.qpos[self._joint_qpos_idx["pitch"]], 
+                                              self.data.qvel[self._joint_qvel_idx["pitch"]])
+            norm_torque[2] = self.pd[2].get_torque(-executed_action[0],
+                                              self.data.qpos[self._joint_qpos_idx["rot2"]], 
+                                              self.data.qvel[self._joint_qvel_idx["rot2"]])
+            norm_torque[3] = self.pd[3].get_torque(executed_action[2],
+                                              self.data.qpos[self._joint_qpos_idx["tail"]], 
+                                              self.data.qvel[self._joint_qvel_idx["tail"]])
+            
+            # Map normalized torque to physical torque
+            physical_torque = np.zeros(4)
+            for i in range(4):
+                ctrl_min, ctrl_max = self.model.actuator_ctrlrange[i]
+                physical_torque[i] = util.map_value(norm_torque[i], -1.0, 1.0, ctrl_min, ctrl_max)
+            
+            # Apply to MuJoCo and advance physics by exactly 1 ms
+            self.data.ctrl[:] = physical_torque
+            mujoco.mj_step(self.model, self.data)
         
-        physical_torque = np.zeros(4)
-        for i in range(4):
-            ctrl_min, ctrl_max = self.model.actuator_ctrlrange[i]
-            physical_torque[i] = util.map_value(norm_torque[i], -1.0, 1.0, ctrl_min, ctrl_max)
-        
-        self.do_simulation(physical_torque, self.frame_skip)
+        # self.ctrls.append(np.hstack([executed_action, self.data.qpos[7:]]))
         # self.ctrls.append(physical_torque)
         observation = self._get_obs()
         reward = self._get_reward(action)
@@ -134,16 +141,16 @@ class CatEnv(MujocoEnv, EzPickle):
         self.model.body_mass[:] = self.nominal_mass * mass_noise
 
         # Joint Damping
-        damping_noise = np.random.uniform(0.85, 1.15, size=self.nominal_damping.shape)
+        damping_noise = np.random.uniform(0.8, 1.2, size=self.nominal_damping.shape)
         self.model.dof_damping[:] = self.nominal_damping * damping_noise
 
         # COM position
-        ipos_noise = np.random.uniform(-0.005, 0.005, size=self.nominal_ipos.shape)
+        ipos_noise = np.random.uniform(-0.03, 0.03, size=self.nominal_ipos.shape)
         ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
         self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
 
         # Inertia tensor
-        inertia_noise = np.random.uniform(0.9, 1.1, size=self.nominal_inertia.shape)
+        inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
         self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
@@ -159,7 +166,7 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # randomize initial orientation
         self.random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = np.random.uniform(-0.2, 0.2)
+        random_pitch = np.random.uniform(-np.pi/4, np.pi/4)
 
         # Set initial rot/pos
         r = R.from_euler("xyz", [self.random_roll, random_pitch, 0], degrees=False)
@@ -195,30 +202,25 @@ class CatEnv(MujocoEnv, EzPickle):
     def _get_reward(self, action):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
-        # spine1_quat = self.data.xquat[self._body_idx["spine_1"]]
-        # spine2_quat = self.data.xquat[self._body_idx["spine_2"]]
 
         # rotation matricies
         r_front = R.from_quat(front_quat[[1, 2, 3, 0]])
         r_rear = R.from_quat(rear_quat[[1, 2, 3, 0]])
-        # r_spine1 = R.from_quat(spine1_quat[[1, 2, 3, 0]])
-        # r_spine2 = R.from_quat(spine2_quat[[1, 2, 3, 0]])
 
         # transform local z vectors to global
         front_up = -r_front.apply([0, 0, 1])
         rear_up = -r_rear.apply([0, 0, 1])
-        # spine1_up = -r_spine1.apply([0, 0, 1])
-        # spine2_up = -r_spine2.apply([0, 0, 1])
 
+        angle_front = np.arccos(np.clip(front_up[2], -1.0, 1.0))
+        angle_rear = np.arccos(np.clip(rear_up[2], -1.0, 1.0))
+        
         # get z component and scale
-        reward_front = (front_up[2] + 1) / 2
-        reward_rear = (rear_up[2] + 1) / 2
-        # reward_spine1 = (spine1_up[2] + 1) / 2
-        # reward_spine2 = (spine2_up[2] + 1) / 2
+        reward_front = 1.0 - (angle_front / np.pi)
+        reward_rear = 1.0 - (angle_rear / np.pi)
         
         r_pos = reward_front*reward_rear
         r_pos *= np.tanh(self.steps*k)
-
+        
         # smoothness reward
         delta = action - self.prev_action
         r_sm = np.mean(delta**2)

@@ -39,7 +39,7 @@ def visualize_error():
     student_obs_dim = 8
     act_dim = env.action_space.shape[0]
     student = StudentPolicy(student_obs_dim, act_dim)
-    student.load_state_dict(torch.load("student_policy_quats_only.pth"))
+    student.load_state_dict(torch.load("student_policy.pth"))
     student.eval()
 
     # Rollout one episode

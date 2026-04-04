@@ -6,16 +6,26 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 from stable_baselines3 import PPO
 import cat_env
+import cat_env.env_util as util
 
 
-# ---- Helper to extract IMU/Quaternion data ----
-def get_student_obs(full_obs):
+def get_noisy_student_obs(full_obs, quat_noise_std=0.01, joint_noise_std=0.02):
     """
-    Extracts only the front and rear body quaternions (8 values total).
-    Based on cat_env.py _get_obs concatenation order:
-    indices 6:10 are front_body_quat, 10:14 are rear_body_quat.
+    Extracts student obs and applies util.add_gaussian_noise.
     """
-    return full_obs[6:14]
+    # Extract clean data
+    quats = full_obs[6:14].copy()
+    joint_angles = full_obs[21:25].copy()
+
+    # Apply noise using your env_util function
+    noisy_quats = util.add_gaussian_noise(quats, quat_noise_std)
+    noisy_joints = util.add_gaussian_noise(joint_angles, joint_noise_std)
+
+    # CRITICAL: Re-normalize the noisy quaternions so they remain valid rotations
+    noisy_quats[0:4] /= np.linalg.norm(noisy_quats[0:4]) # Front body
+    noisy_quats[4:8] /= np.linalg.norm(noisy_quats[4:8]) # Rear body
+
+    return np.concatenate([noisy_quats, noisy_joints])
 
 # ---- 1. Define the Student Policy ----
 class StudentPolicy(nn.Module):
@@ -46,8 +56,8 @@ def collect_data(env, student_policy, expert_policy, num_steps, is_student_actin
     
     for _ in range(num_steps):
         # 1. Extract what the student is allowed to see
-        student_obs = get_student_obs(full_obs)
-        student_states.append(student_obs)
+        noisy_student_obs = get_noisy_student_obs(full_obs)
+        student_states.append(noisy_student_obs)
 
         # 2. The Privileged Expert gets the full observation to generate ground-truth labels
         exp_action, _ = expert_policy.predict(full_obs, deterministic=True)
@@ -56,8 +66,8 @@ def collect_data(env, student_policy, expert_policy, num_steps, is_student_actin
         # 3. Decide who drives the environment for this step
         if is_student_acting:
             with torch.no_grad():
-                obs_tensor = torch.FloatTensor(student_obs).unsqueeze(0)
-                # The student predicts the action using ONLY quaternions
+                obs_tensor = torch.FloatTensor(noisy_student_obs).unsqueeze(0)
+                # The student predicts the action using quats and joint angles
                 act_action = student_policy(obs_tensor).squeeze(0).numpy()
         else:
             act_action = exp_action
@@ -74,8 +84,8 @@ def collect_data(env, student_policy, expert_policy, num_steps, is_student_actin
 def run_dagger():
     env = gym.make("Cat-v0")
     
-    # We explicitly define the dimensions now since they don't match the gym env directly
-    student_obs_dim = 8  # 4 for front quat + 4 for rear quat
+    # Updated: 8 for quats + 4 for joint angles = 12 total dimensions
+    student_obs_dim = 12  
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
@@ -122,8 +132,13 @@ def run_dagger():
         D_states = np.concatenate([D_states, new_states], axis=0)
         D_actions = np.concatenate([D_actions, new_expert_actions], axis=0)
 
-    torch.save(student.state_dict(), "student_policy_quats_only.pth")
-    print("\nDAgger training complete! Student saved to student_policy_quats_only.pth")
+        max_buffer_size = 40000
+        if len(D_states) > max_buffer_size:
+            D_states = D_states[-max_buffer_size:]
+            D_actions = D_actions[-max_buffer_size:]
+
+    # Changed save filename to reflect new observation space
+    torch.save(student.state_dict(), "student_policy.pth")
 
 if __name__ == "__main__":
-    run_dagger() 
+    run_dagger()

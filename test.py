@@ -2,6 +2,7 @@ import gymnasium as gym
 from stable_baselines3 import PPO
 import torch
 import torch.nn as nn
+import numpy as np
 import os
 import time
 import mujoco
@@ -22,24 +23,26 @@ class StudentPolicy(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-    
+
 def get_student_obs(full_obs):
-    return full_obs[6:14]
+    quats = full_obs[6:14]
+    joint_angles = full_obs[21:25]
+    return np.concatenate([quats, joint_angles])
 
 def visualize():
     env = gym.make("Cat-v0")
     model_path = "cat_controller"
 
-    agent = 'teacher'
+    agent = 'student'
     if agent == 'teacher':
         print("Loading teacher policy")
         teacher = PPO.load(model_path)
     elif agent =='student':
         print("Loading student policy")
-        student_obs_dim = 8
+        student_obs_dim = 12
         act_dim = env.action_space.shape[0]
         student = StudentPolicy(student_obs_dim, act_dim)
-        student.load_state_dict(torch.load("student_policy_quats_only.pth"))
+        student.load_state_dict(torch.load("student_policy.pth"))
 
     obs, _ = env.reset()
     
