@@ -83,7 +83,7 @@ def visualize():
     }
 
     # Load telemetry
-    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775332381.csv")
+    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775333675.csv")
     num_steps = len(telemetry["front_quat"])
     fps = 100
     
@@ -102,7 +102,7 @@ def visualize():
             data.qpos[0:3] = [0, 0, 3] 
             
             # Root orientation: quat - (w, x, y, z)
-            data.qpos[3:7] = telemetry["front_quat"][step]
+            data.qpos[3:7] = telemetry["rear_quat"][step]
             
             # Joint angles
             data.qpos[joint_qpos_idx["rot1"]] = telemetry["rot1"][step]
