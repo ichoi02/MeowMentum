@@ -250,25 +250,6 @@ def keyboard_input_thread():
         except Exception as e:
             print(f"Invalid input. Try again. ({e})")
 
-def _check_stale_quaternions(
-    front: TeensyInterface,
-    back: TeensyInterface,
-    now: float,
-    telemetry_start: float,
-    max_age: float,
-    first_grace: float,
-) -> Optional[str]:
-    """Return a human-readable reason if telemetry is stale, else None."""
-    for board in (front, back):
-        if board.last_valid_telemetry_time is None:
-            if now - telemetry_start > first_grace:
-                return f"{board.name}: no valid telemetry line received within {first_grace:g}s"
-        elif now - board.last_valid_telemetry_time > max_age:
-            age = now - board.last_valid_telemetry_time
-            return f"{board.name}: no fresh quaternion/encoder line for {age:.2f}s (stale)"
-    return None
-
-
 def main():
     parser = argparse.ArgumentParser(description="Teensy Control Loop with Telemetry Logging")
     parser.add_argument(
@@ -361,18 +342,6 @@ def main():
             back.update_sensor_data()
 
             now = time.time()
-            stale_reason = _check_stale_quaternions(
-                front,
-                back,
-                now,
-                telemetry_start,
-                args.quat_stale_sec,
-                args.quat_first_grace_sec,
-            )
-            if stale_reason:
-                print(f"\nStopping telemetry: STALE QUATERNIONS — {stale_reason}")
-                break
-
             action = [0, 0, 0, 0]
 
             if args.debug:

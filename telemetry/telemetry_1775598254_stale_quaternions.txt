@@ -1,0 +1,2 @@
+stale_quaternions
+Front: no valid telemetry line received within 3s
