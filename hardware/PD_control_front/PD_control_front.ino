@@ -1,6 +1,8 @@
 #include <Encoder.h>
 #include <Wire.h>
 #include <Adafruit_BNO08x.h>
+#include <cstdio>
+#include <cstring>
 
 const float M1GEAR = 9.68;
 const float M2GEAR = 9.68;
@@ -49,6 +51,8 @@ const int PWM_MAX = 1023;
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
 const uint32_t PRINT_PERIOD_MS = 50;
+// One telemetry line (~90 bytes); avoid Serial blocking when USB RX stalls on host.
+static char s_telemBuf[128];
 
 // ==========================================
 // 4. STATE VARIABLES
@@ -69,7 +73,6 @@ float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
 // ==========================================
 void setup() {
   Serial.begin(115200);
-  Serial.setTimeout(5);
 
   pinMode(M1INA, OUTPUT);
   pinMode(M1INB, OUTPUT);
@@ -97,14 +100,24 @@ void setup() {
   lastControlMicros = micros();
   lastPrintMillis = millis();
 
-  // IMU Setup
+  // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
   Wire.setClock(400000);
-  if (!bno08x.begin_I2C(0x4A, &Wire)) {
+  bool imu_ok = false;
+  for (int attempt = 0; attempt < 30 && !imu_ok; attempt++) {
+    if (bno08x.begin_I2C(0x4A, &Wire)) imu_ok = true;
+    else delay(100);
+  }
+  if (!imu_ok) {
     while (1) { delay(100); }
   }
-  
-  if (!bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000)) {
+
+  imu_ok = false;
+  for (int attempt = 0; attempt < 30 && !imu_ok; attempt++) {
+    if (bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000)) imu_ok = true;
+    else delay(100);
+  }
+  if (!imu_ok) {
     while (1) { delay(100); }
   }
 }
@@ -138,12 +151,13 @@ void loop() {
     float angle1 = readEncoder1();
     float angle2 = readEncoder2();
 
-    Serial.print(imu_qr, 6); Serial.print(",");
-    Serial.print(imu_qi, 6); Serial.print(",");
-    Serial.print(imu_qj, 6); Serial.print(",");
-    Serial.print(imu_qk, 6); Serial.print(",");
-    Serial.print(angle1, 4); Serial.print(",");
-    Serial.println(angle2, 4);
+    int n = snprintf(s_telemBuf, sizeof(s_telemBuf),
+                     "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f\n",
+                     imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2);
+    if (n > 0 && n < (int)sizeof(s_telemBuf) &&
+        Serial.availableForWrite() >= n) {
+      Serial.write((const uint8_t *)s_telemBuf, (size_t)n);
+    }
   }
 }
 
@@ -185,39 +199,61 @@ void runController(double dt) {
 }
 
 // ==========================================
-// 8. SERIAL INPUT
+// 8. SERIAL INPUT (non-blocking: no readStringUntil timeout stalls)
 // ==========================================
+static void processSerialLine(char *line) {
+  while (*line == ' ' || *line == '\t') line++;
+  size_t len = strlen(line);
+  while (len > 0 && (line[len - 1] == ' ' || line[len - 1] == '\t')) {
+    line[--len] = '\0';
+  }
+  if (len == 0) return;
+
+  if (strcmp(line, "RESET") == 0) {
+    enc1.write(0);
+    enc2.write(0);
+  } else if (strcmp(line, "START") == 0) {
+    digitalWrite(M1EN, HIGH);
+    digitalWrite(M2EN, HIGH);
+  } else if (strcmp(line, "STOP") == 0) {
+    digitalWrite(M1EN, LOW);
+    digitalWrite(M2EN, LOW);
+  } else if (strcmp(line, "REBOOT") == 0) {
+    const char msg[] = "Rebooting...\n";
+    if ((int)Serial.availableForWrite() >= (int)sizeof(msg) - 1) {
+      Serial.write((const uint8_t *)msg, sizeof(msg) - 1);
+    }
+    delay(100);
+    SCB_AIRCR = 0x05FA0004;
+  } else if (strcmp(line, "RESET_IMU") == 0) {
+    sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
+  } else {
+    float a, b;
+    if (sscanf(line, "%f,%f", &a, &b) == 2) {
+      targetPos1 = a;
+      targetPos2 = b;
+    }
+  }
+}
+
 void handleSerialInput() {
-  if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    
-    if (input == "RESET") {
-      enc1.write(0);
-      enc2.write(0);
-    } 
-    else if (input == "START") { 
-      digitalWrite(M1EN, HIGH);
-      digitalWrite(M2EN, HIGH);
-    }
-    else if (input == "STOP") {
-      digitalWrite(M1EN, LOW);
-      digitalWrite(M2EN, LOW);
-    }
-    else if (input == "REBOOT") {
-      Serial.println("Rebooting...");
-      delay(100);
-      SCB_AIRCR = 0x05FA0004; 
-    }
-    else if (input == "RESET_IMU") {
-      sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
-    }
-    else {
-      int commaIndex = input.indexOf(',');
-      if (commaIndex > 0) {
-        targetPos1 = input.substring(0, commaIndex).toFloat();
-        targetPos2 = input.substring(commaIndex + 1).toFloat();
+  static char lineBuf[80];
+  static size_t lineLen = 0;
+  int budget = 64;
+  while (Serial.available() && budget-- > 0) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (lineLen > 0) {
+        lineBuf[lineLen] = '\0';
+        processSerialLine(lineBuf);
+        lineLen = 0;
       }
+      continue;
+    }
+    if (lineLen < sizeof(lineBuf) - 1) {
+      lineBuf[lineLen++] = c;
+    } else {
+      lineLen = 0;
     }
   }
 }
@@ -234,7 +270,7 @@ float readEncoder1() {
 float readEncoder2() {
   long pos = enc2.read();
   if (ENCODER2_REVERSED) pos = -pos;
-  return (float)pos/TICKS_PER_REV/M1GEAR*2*PI;
+  return (float)pos/TICKS_PER_REV/M2GEAR*2*PI;
 }
 
 // ==========================================

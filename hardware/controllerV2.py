@@ -51,6 +51,17 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
+
+def _open_teensy_serial(port_path: str) -> serial.Serial:
+    # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
+    return serial.Serial(
+        port_path,
+        BAUD_RATE,
+        timeout=0.005,
+        write_timeout=0,
+    )
+
+
 debug_action = [0.0, 0.0, 0.0, 0.0]
 
 class TeensyInterface:
@@ -58,7 +69,7 @@ class TeensyInterface:
         self.port_path = port_path
         self.name = name
         self._rx_remainder = b""
-        self.ser = serial.Serial(port_path, BAUD_RATE, timeout=0.005)
+        self.ser = _open_teensy_serial(port_path)
 
     def reopen_serial(self):
         try:
@@ -66,13 +77,18 @@ class TeensyInterface:
         except (OSError, AttributeError, ValueError):
             pass
         time.sleep(0.2)
-        self.ser = serial.Serial(self.port_path, BAUD_RATE, timeout=0.005)
+        self.ser = _open_teensy_serial(self.port_path)
         self._rx_remainder = b""
         time.sleep(0.05)
 
     def _is_serial_gone(self, err):
         en = getattr(err, "errno", None)
-        return en == 5 or en == 19  # EIO, ENODEV
+        if en is None and getattr(err, "args", None):
+            a0 = err.args[0]
+            if isinstance(a0, OSError):
+                en = a0.errno
+        # EIO, EBADF, ENODEV, EPIPE — typical when USB CDC drops or device resets.
+        return en in (5, 9, 19, 32)
 
     def flush_input_safe(self):
         """tcflush can raise EIO if USB CDC reset/re-enumerated; reopen and retry once."""
@@ -95,7 +111,7 @@ class TeensyInterface:
         try:
             self.ser.write(b"RESET\n")
             print(f"{self.name}: Reset encoders.")
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
     
@@ -103,7 +119,7 @@ class TeensyInterface:
         try:
             self.ser.write(b"RESET_IMU\n")
             print(f"{self.name}: Reset IMU.")
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
 
@@ -111,15 +127,15 @@ class TeensyInterface:
         try:
             self.ser.write(b"REBOOT\n")
             print(f"{self.name}: Reboot.")
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
 
     def stop_all_motors(self):
         try:
             self.ser.write(b"STOP\n")
-            print(f"{self.name}: Stopping otors.")
-        except OSError as e:
+            print(f"{self.name}: Stopping motors.")
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
 
@@ -127,7 +143,7 @@ class TeensyInterface:
         try:
             self.ser.write(b"START\n")
             print(f"{self.name}: Starting motors.")
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
 
@@ -135,9 +151,9 @@ class TeensyInterface:
         """Reads buffered lines to get the freshest IMU and encoder data."""
         try:
             waiting = self.ser.in_waiting
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
-                print(f"{self.name}: serial EIO in update_sensor_data; reopening…")
+                print(f"{self.name}: serial I/O in update_sensor_data; reopening…")
                 self.reopen_serial()
             return
 
@@ -147,7 +163,7 @@ class TeensyInterface:
         max_bytes = min(waiting, 4096)
         try:
             raw = self.ser.read(max_bytes)
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
             return
@@ -182,13 +198,13 @@ class TeensyInterface:
                     pass
 
     def set_motors(self, m1, m2):
-        """Sends target motor angles (2dp) to Teensy. Assumes format: 'M1,M2\n'"""
+        """Sends target motor angles (2dp) to Teensy: 'm1,m2\\n'."""
         cmd = f"{m1:.2f},{m2:.2f}\n"
         try:
             self.ser.write(cmd.encode('utf-8'))
-        except OSError as e:
+        except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
-                print(f"{self.name}: serial EIO in set_motors; reopening…")
+                print(f"{self.name}: serial I/O error in set_motors; reopening…")
                 self.reopen_serial()
     
     def align_imu_quaternions(self, quats_wxyz, imu_type):
