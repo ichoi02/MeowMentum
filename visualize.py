@@ -7,11 +7,13 @@ import os
 
 def load_telemetry_csv(filepath):
     columns = [
-        "Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2", 
-        "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2"
+        "Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2",
+        "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2",
     ]
-    
-    df = pd.read_csv(filepath, usecols=columns)
+    df = pd.read_csv(filepath)
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"Telemetry CSV missing columns: {missing}")
     
     front_quats = df[["F_Q0", "F_Q1", "F_Q2", "F_Q3"]].to_numpy()
     rear_quats = df[["B_Q0", "B_Q1", "B_Q2", "B_Q3"]].to_numpy()
