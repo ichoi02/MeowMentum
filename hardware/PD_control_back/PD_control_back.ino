@@ -65,6 +65,7 @@ uint32_t lastPrintMillis = 0;
 
 // global IMU
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
+float acc_mag = 0.0;
 
 // ==========================================
 // 5. SETUP
@@ -115,6 +116,9 @@ void setup() {
     if (bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000)) imu_ok = true;
     else delay(100);
   }
+  if (!bno08x.enableReport(SH2_ACCELEROMETER, 10000)) {
+    while (1) { delay(100); }
+  }
   if (!imu_ok) {
     while (1) { delay(100); }
   }
@@ -127,11 +131,21 @@ void loop() {
   handleSerialInput();
 
   if (bno08x.getSensorEvent(&sensorValue)) {
-    if (sensorValue.sensorId == SH2_GAME_ROTATION_VECTOR) {
-      imu_qr = sensorValue.un.gameRotationVector.real;
-      imu_qi = sensorValue.un.gameRotationVector.i;
-      imu_qj = sensorValue.un.gameRotationVector.j;
-      imu_qk = sensorValue.un.gameRotationVector.k;
+    switch (sensorValue.sensorId) {
+      case SH2_GAME_ROTATION_VECTOR:
+        imu_qr = sensorValue.un.gameRotationVector.real;
+        imu_qi = sensorValue.un.gameRotationVector.i;
+        imu_qj = sensorValue.un.gameRotationVector.j;
+        imu_qk = sensorValue.un.gameRotationVector.k;
+        break;
+        
+      case SH2_ACCELEROMETER:
+        float ax = sensorValue.un.accelerometer.x;
+        float ay = sensorValue.un.accelerometer.y;
+        float az = sensorValue.un.accelerometer.z;
+        // Calculate magnitude: sqrt(x^2 + y^2 + z^2)
+        acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
+        break;
     }
   }
 
@@ -150,8 +164,8 @@ void loop() {
     float angle2 = readEncoder2();
 
     int n = snprintf(s_telemBuf, sizeof(s_telemBuf),
-                     "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f\n",
-                     imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2);
+                     "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.4f\n",
+                     imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2, acc_mag);
     if (n > 0 && n < (int)sizeof(s_telemBuf) &&
         Serial.availableForWrite() >= n) {
       Serial.write((const uint8_t *)s_telemBuf, (size_t)n);
