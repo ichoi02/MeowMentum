@@ -8,24 +8,24 @@ from stable_baselines3 import PPO
 import cat_env
 import cat_env.env_util as util
 
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+print(f"Using device: {device}")
 
-def get_noisy_student_obs(full_obs, quat_noise_std=0.01, joint_noise_std=0.02):
-    """
-    Extracts student obs and applies util.add_gaussian_noise.
-    """
+def get_noisy_student_obs(full_obs, rot_noise_std=0.01, joint_noise_std=0.02):
     # Extract clean data
-    quats = full_obs[6:14].copy()
-    joint_angles = full_obs[21:25].copy()
+    rots = full_obs[0:18].copy() # two 9D rotation matrices
+    joint_angles = full_obs[18+7:18+7+4].copy() # qpos[7:]
 
     # Apply noise using your env_util function
-    noisy_quats = util.add_gaussian_noise(quats, quat_noise_std)
+    noisy_rots = util.add_rotational_noise(rots, rot_noise_std)
     noisy_joints = util.add_gaussian_noise(joint_angles, joint_noise_std)
 
-    # CRITICAL: Re-normalize the noisy quaternions so they remain valid rotations
-    noisy_quats[0:4] /= np.linalg.norm(noisy_quats[0:4]) # Front body
-    noisy_quats[4:8] /= np.linalg.norm(noisy_quats[4:8]) # Rear body
-
-    return np.concatenate([noisy_quats, noisy_joints])
+    return np.concatenate([noisy_rots, noisy_joints])
 
 # ---- 1. Define the Student Policy ----
 class StudentPolicy(nn.Module):
@@ -84,8 +84,8 @@ def collect_data(env, student_policy, expert_policy, num_steps, is_student_actin
 def run_dagger():
     env = gym.make("Cat-v0")
     
-    # Updated: 8 for quats + 4 for joint angles = 12 total dimensions
-    student_obs_dim = 12  
+    # 18 for rotation matrix + 4 for joint angles = 22 total dimensions
+    student_obs_dim = 22
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")

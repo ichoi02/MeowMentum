@@ -98,6 +98,14 @@ class TeensyInterface:
         except OSError as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
+    
+    def reset_IMU(self):
+        try:
+            self.ser.write(b"RESET_IMU\n")
+            print(f"{self.name}: Reset IMU.")
+        except OSError as e:
+            if self._is_serial_gone(e):
+                self.reopen_serial()
 
     def reboot_teensy(self):
         try:
@@ -184,29 +192,17 @@ class TeensyInterface:
                 self.reopen_serial()
     
     def align_imu_quaternions(self, quats_wxyz, imu_type):
-        quats_xyzw = np.empty_like(quats_wxyz)
-        quats_xyzw[:, 0:3] = quats_wxyz[:, 1:4]  # Move x, y, z
-        quats_xyzw[:, 3] = quats_wxyz[:, 0]      # Move w to the end
+        r_raw = R.from_quat(quats_wxyz, scalar_first=True)
         
-        r_raw = R.from_quat(quats_xyzw)
-        
-        # 2. Define the alignment rotations
         if imu_type == 'Front':
-            r_align = R.from_euler('z', -90, degrees=True)
+            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
             
         elif imu_type == 'Back':
-            axis = np.array([1, -1, 0])
-            axis_normalized = axis / np.linalg.norm(axis)
-            r_align = R.from_rotvec(np.pi * axis_normalized)
+            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
             
         r_global = r_raw * r_align
         
-        aligned_xyzw = r_global.as_quat()
-        
-        aligned_wxyz = np.empty_like(aligned_xyzw)
-        aligned_wxyz[:, 0] = aligned_xyzw[:, 3]      # Move w to the front
-        aligned_wxyz[:, 1:4] = aligned_xyzw[:, 0:3]  # Move x, y, z
-        
+        aligned_wxyz = r_global.as_quat(scalar_first=True)
         return aligned_wxyz.squeeze(0)
 
 def get_port_by_sn(serial_number):
@@ -263,6 +259,11 @@ def main():
     front.reset_encoders()
     back.reset_encoders()
     time.sleep(0.25)  # Let Teensy drain RESET; CDC can return EIO on flush if too early
+
+    print("Zeroing IMU quaternions...")
+    front.reset_IMU()
+    back.reset_IMU()
+    time.sleep(0.25)
     
     # Flush any stale data that was transmitted before the reset happened
     front.flush_input_safe()

@@ -23,7 +23,7 @@ class CatEnv(MujocoEnv, EzPickle):
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
         
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(40,), dtype=np.float64)
+        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(50,), dtype=np.float64)
         action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float64)
 
         MujocoEnv.__init__(
@@ -165,11 +165,12 @@ class CatEnv(MujocoEnv, EzPickle):
         qvel = self.init_qvel.copy()
 
         # randomize initial orientation
-        self.random_roll = 0#np.random.uniform(-np.pi, np.pi)
-        random_pitch = 0#np.random.uniform(-np.pi/4, np.pi/4)
+        self.random_roll = np.random.uniform(-np.pi, np.pi)
+        random_pitch = np.random.uniform(-np.pi/6, np.pi/6)
+        random_yaw = np.random.uniform(-np.pi, np.pi)
 
         # Set initial rot/pos
-        r = R.from_euler("xyz", [self.random_roll, random_pitch, 0], degrees=False)
+        r = R.from_euler("xyz", [self.random_roll, random_pitch, random_yaw], degrees=False)
         quat_xyzw = r.as_quat()
         qpos[3:7] = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
 
@@ -181,20 +182,19 @@ class CatEnv(MujocoEnv, EzPickle):
         front_body_pos = self.data.xpos[self._body_idx["front_body"]]
         rear_body_pos = self.data.xpos[self._body_idx["rear_body"]]
 
-        front_body_quat = self.data.xquat[self._body_idx["front_body"]]
-        rear_body_quat = self.data.xquat[self._body_idx["rear_body"]]
+        front_body_rot = util.to_rotation_matrix(self.data.xquat[self._body_idx["front_body"]])
+        rear_body_rot = util.to_rotation_matrix(self.data.xquat[self._body_idx["rear_body"]])
 
         qpos = self.data.qpos
         qvel = self.data.qvel
-        qacc = self.data.qacc
 
         ctrl = self.data.ctrl
         step = np.array([self.steps / self.max_steps])
         
         obs = np.concatenate([
+            front_body_rot, rear_body_rot,
+            qpos, qvel,
             front_body_pos, rear_body_pos,
-            front_body_quat, rear_body_quat,
-            qpos, qvel, #qacc,
             ctrl, step
         ])
         return obs
@@ -208,8 +208,8 @@ class CatEnv(MujocoEnv, EzPickle):
         r_rear = R.from_quat(rear_quat, scalar_first=True)
 
         # transform local z vectors to global
-        front_up = -r_front.apply([0, 0, 1])
-        rear_up = -r_rear.apply([0, 0, 1])
+        front_up = r_front.apply([0, 0, 1])
+        rear_up = r_rear.apply([0, 0, 1])
 
         angle_front = np.arccos(np.clip(front_up[2], -1.0, 1.0))
         angle_rear = np.arccos(np.clip(rear_up[2], -1.0, 1.0))

@@ -25,8 +25,8 @@ class StudentPolicy(nn.Module):
         return self.net(x)
 
 def get_student_obs(full_obs):
-    quats = full_obs[6:14]
-    joint_angles = full_obs[21:25]
+    quats = full_obs[0:18]
+    joint_angles = full_obs[18+7:18+7+4]
     return np.concatenate([quats, joint_angles])
 
 def visualize():
@@ -39,7 +39,7 @@ def visualize():
         teacher = PPO.load(model_path)
     elif agent =='student':
         print("Loading student policy")
-        student_obs_dim = 12
+        student_obs_dim = 22
         act_dim = env.action_space.shape[0]
         student = StudentPolicy(student_obs_dim, act_dim)
         student.load_state_dict(torch.load("student_policy.pth"))
