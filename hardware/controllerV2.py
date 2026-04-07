@@ -40,6 +40,7 @@ import argparse
 import numpy as np
 import csv
 import threading
+from typing import Optional
 
 # --- CONFIGURATION ---
 SN_FRONT = "18451300" 
@@ -51,8 +52,10 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
-# Teensy sends IMU lines ~20 Hz (50 ms). If no valid line arrives for this long, quat values are repeats.
-QUAT_STALE_SEC = 0.35
+# No new parsed telemetry line for this long ⇒ quaternion is stale (host not receiving fresh IMU data).
+QUAT_STALE_MAX_AGE_S = 1.0
+# After logging starts, allow this long for the first valid line per board before treating as failure.
+QUAT_FIRST_LINE_GRACE_S = 3.0
 
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
@@ -73,7 +76,8 @@ class TeensyInterface:
         self.name = name
         self._rx_remainder = b""
         self.ser = _open_teensy_serial(port_path)
-        self.last_quat_monotonic = time.monotonic()
+        # Set when a full 6-field line is successfully parsed (fresh quaternion + encoders from serial).
+        self.last_valid_telemetry_time: Optional[float] = None
 
     def reopen_serial(self):
         try:
@@ -83,7 +87,6 @@ class TeensyInterface:
         time.sleep(0.2)
         self.ser = _open_teensy_serial(self.port_path)
         self._rx_remainder = b""
-        self.last_quat_monotonic = time.monotonic()
         time.sleep(0.05)
 
     def _is_serial_gone(self, err):
@@ -107,10 +110,10 @@ class TeensyInterface:
             except (termios.error, OSError):
                 pass
         self._rx_remainder = b""
-        self.quat = [1.0, 0.0, 0.0, 0.0]
+        self.quat = [1.0, 0.0, 0.0, 0.0] 
         self.m1_rad = 0.0
         self.m2_rad = 0.0
-        self.last_quat_monotonic = time.monotonic()
+        self.last_valid_telemetry_time = None
 
     def reset_encoders(self):
         """Sends the command to zero out the hardware encoder counts."""
@@ -200,12 +203,9 @@ class TeensyInterface:
                     self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
-                    self.last_quat_monotonic = time.monotonic()
+                    self.last_valid_telemetry_time = time.time()
                 except ValueError:
                     pass
-
-    def quat_data_stale(self) -> bool:
-        return (time.monotonic() - self.last_quat_monotonic) > QUAT_STALE_SEC
 
     def set_motors(self, m1, m2):
         """Sends target motor angles (2dp) to Teensy: 'm1,m2\\n'."""
@@ -250,12 +250,43 @@ def keyboard_input_thread():
         except Exception as e:
             print(f"Invalid input. Try again. ({e})")
 
+def _check_stale_quaternions(
+    front: TeensyInterface,
+    back: TeensyInterface,
+    now: float,
+    telemetry_start: float,
+    max_age: float,
+    first_grace: float,
+) -> Optional[str]:
+    """Return a human-readable reason if telemetry is stale, else None."""
+    for board in (front, back):
+        if board.last_valid_telemetry_time is None:
+            if now - telemetry_start > first_grace:
+                return f"{board.name}: no valid telemetry line received within {first_grace:g}s"
+        elif now - board.last_valid_telemetry_time > max_age:
+            age = now - board.last_valid_telemetry_time
+            return f"{board.name}: no fresh quaternion/encoder line for {age:.2f}s (stale)"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Teensy Control Loop with Telemetry Logging")
     parser.add_argument(
         '--debug',
         action='store_true',
         help="P-control test: sinusoidal joint targets within ±DEBUG_JOINT_SWING_DEG (see CONFIG)",
+    )
+    parser.add_argument(
+        "--quat-stale-sec",
+        type=float,
+        default=QUAT_STALE_MAX_AGE_S,
+        help=f"Stop logging if no new parsed line from a board for this many seconds (default: {QUAT_STALE_MAX_AGE_S}).",
+    )
+    parser.add_argument(
+        "--quat-first-grace-sec",
+        type=float,
+        default=QUAT_FIRST_LINE_GRACE_S,
+        help=f"Allow this long after start for the first valid line per board (default: {QUAT_FIRST_LINE_GRACE_S}).",
     )
     args = parser.parse_args()
 
@@ -313,16 +344,14 @@ def main():
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
     log = []
-    telemetry_cutoff = False
     
     if args.debug:
         print("Debug mode initiated: enter '[motor num] [target angle]'")
         threading.Thread(target=keyboard_input_thread, daemon=True).start()
 
     print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
-    # Stale detection window starts when the control loop starts (not at USB connect / long prompts).
-    front.last_quat_monotonic = time.monotonic()
-    back.last_quat_monotonic = time.monotonic()
+    telemetry_start = time.time()
+    stale_reason: Optional[str] = None
     try:
         while(True): # FIXME: need to limit running time
             loop_start = time.time()
@@ -330,6 +359,19 @@ def main():
 
             front.update_sensor_data()
             back.update_sensor_data()
+
+            now = time.time()
+            stale_reason = _check_stale_quaternions(
+                front,
+                back,
+                now,
+                telemetry_start,
+                args.quat_stale_sec,
+                args.quat_first_grace_sec,
+            )
+            if stale_reason:
+                print(f"\nStopping telemetry: STALE QUATERNIONS — {stale_reason}")
+                break
 
             action = [0, 0, 0, 0]
 
@@ -342,42 +384,15 @@ def main():
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
 
-            if not telemetry_cutoff:
-                stale_f = front.quat_data_stale()
-                stale_b = back.quat_data_stale()
-                if stale_f or stale_b:
-                    which = []
-                    if stale_f:
-                        which.append("Front")
-                    if stale_b:
-                        which.append("Back")
-                    tag = "stale_quaternions:" + "+".join(which)
-                    print(
-                        f"{tag} — no valid IMU CSV line within {QUAT_STALE_SEC}s "
-                        f"(repeated quaternion in telemetry). Logging stopped; motors still running."
-                    )
-                    log.append([
-                        round(t, 4),
-                        front.quat[0], front.quat[1], front.quat[2], front.quat[3],
-                        front.m1_rad, front.m2_rad,
-                        action[0], action[1],
-                        back.quat[0], back.quat[1], back.quat[2], back.quat[3],
-                        back.m1_rad, back.m2_rad,
-                        action[2], action[3],
-                        tag,
-                    ])
-                    telemetry_cutoff = True
-                else:
-                    log.append([
-                        round(t, 4),
-                        front.quat[0], front.quat[1], front.quat[2], front.quat[3],
-                        front.m1_rad, front.m2_rad,
-                        action[0], action[1],
-                        back.quat[0], back.quat[1], back.quat[2], back.quat[3],
-                        back.m1_rad, back.m2_rad,
-                        action[2], action[3],
-                        "ok",
-                    ])
+            log.append([
+                round(t, 4),
+                front.quat[0], front.quat[1], front.quat[2], front.quat[3],
+                front.m1_rad, front.m2_rad,
+                action[0], action[1],
+                back.quat[0], back.quat[1], back.quat[2], back.quat[3],
+                back.m1_rad, back.m2_rad,
+                action[2], action[3],
+            ])
 
             # Enforce timing
             elapsed = time.time() - loop_start
@@ -388,21 +403,28 @@ def main():
 
     except KeyboardInterrupt:
         print("\nExiting...")
+    finally:
         front.stop_all_motors()
         back.stop_all_motors()
+        ts = int(time.time())
         if log:
-            filename = f"telemetry/telemetry_{int(time.time())}.csv"
+            filename = f"telemetry/telemetry_{ts}.csv"
             print(f"Saving {len(log)} records to {filename}...")
             with open(filename, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    "Time",
-                    "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2",
-                    "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2",
-                    "Quat_telemetry",
-                ])
+                writer.writerow(["Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2", 
+                                 "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2"])
                 writer.writerows(log)
             print("Done.")
+        if stale_reason:
+            meta_path = f"telemetry/telemetry_{ts}_stale_quaternions.txt"
+            try:
+                with open(meta_path, "w", encoding="utf-8") as mf:
+                    mf.write("stale_quaternions\n")
+                    mf.write(stale_reason + "\n")
+                print(f"Stale-quaternion note written to {meta_path}")
+            except OSError as e:
+                print(f"Could not write stale-quaternion note: {e}")
 
 if __name__ == "__main__":
     main()
