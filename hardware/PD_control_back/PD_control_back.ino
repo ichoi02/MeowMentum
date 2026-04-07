@@ -83,8 +83,8 @@ void setup() {
   pinMode(M2PWM, OUTPUT);
   pinMode(M2EN, OUTPUT);
 
-  digitalWrite(M1EN, HIGH);
-  digitalWrite(M2EN, HIGH);
+  digitalWrite(M1EN, LOW);
+  digitalWrite(M2EN, LOW);
 
   analogWriteFrequency(M1PWM, 20000);
   analogWriteFrequency(M2PWM, 20000);
