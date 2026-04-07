@@ -71,6 +71,11 @@ class TeensyInterface:
         self._rx_remainder = b""
         self.ser = _open_teensy_serial(port_path)
 
+        self.quat = [1.0, 0.0, 0.0, 0.0]
+        self.m1_rad = 0.0
+        self.m2_rad = 0.0
+        self.acc_mag = 0.0
+
     def reopen_serial(self):
         try:
             self.ser.close()
@@ -105,6 +110,7 @@ class TeensyInterface:
         self.quat = [1.0, 0.0, 0.0, 0.0] 
         self.m1_rad = 0.0
         self.m2_rad = 0.0
+        self.acc_mag = 0.0
 
     def reset_encoders(self):
         """Sends the command to zero out the hardware encoder counts."""
@@ -119,6 +125,14 @@ class TeensyInterface:
         try:
             self.ser.write(b"RESET_IMU\n")
             print(f"{self.name}: Reset IMU.")
+        except (OSError, serial.SerialException) as e:
+            if self._is_serial_gone(e):
+                self.reopen_serial()
+    
+    def reset_I2C(self):
+        try:
+            self.ser.write(b"RESET_I2C\n")
+            print(f"{self.name}: Reset I2C.")
         except (OSError, serial.SerialException) as e:
             if self._is_serial_gone(e):
                 self.reopen_serial()
@@ -281,6 +295,11 @@ def main():
     front.reset_IMU()
     back.reset_IMU()
     time.sleep(0.5)
+
+    print("Resetting I2C comms...")
+    front.reset_I2C()
+    back.reset_I2C()
+    time.sleep(0.5)
     
     # Flush any stale data that was transmitted before the reset happened
     front.flush_input_safe()
@@ -317,7 +336,7 @@ def main():
 
             front.update_sensor_data()
             back.update_sensor_data()
-
+            
             action = [0, 0, 0, 0]
 
             if args.debug:

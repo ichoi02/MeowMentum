@@ -3,6 +3,7 @@
 #include <Adafruit_BNO08x.h>
 #include <cstdio>
 #include <cstring>
+#include <math.h>
 
 const float M1GEAR = 9.68;
 const float M2GEAR = 9.68;
@@ -67,8 +68,62 @@ uint32_t lastPrintMillis = 0;
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
 float acc_mag = 0.0;
 
+// Watchdog variables for I2C freeze recovery
+static uint32_t lastGameRotEventMs = 0;
+static const uint32_t IMU_STALE_MS = 1500;
+static const uint32_t IMU_RECOVER_COOLDOWN_MS = 2500;
+
 // ==========================================
-// 5. SETUP
+// 5. I2C RECOVERY FUNCTIONS
+// ==========================================
+
+// Manually sends 9 clock pulses to unstick a frozen BNO08x holding the SDA line low
+void clearI2CBus() {
+  Wire.end();
+  
+  // Take manual control of the Teensy 4.0 default I2C pins
+  pinMode(18, INPUT_PULLUP); // SDA
+  pinMode(19, OUTPUT);       // SCL
+  
+  // Send 9 clock pulses to unstick the sensor
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(19, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(19, LOW);
+    delayMicroseconds(5);
+  }
+  
+  // Give the bus a moment to settle, then restart I2C
+  delay(10);
+  Wire.begin();
+  Wire.setClock(50000); // Keep at 50kHz for long wires
+}
+
+// Re-initializes both reports (used during setup and recovery)
+static bool bno08x_begin_and_enable() {
+  bool ok = false;
+  for (int attempt = 0; attempt < 25 && !ok; attempt++) {
+    if (bno08x.begin_I2C(0x4A, &Wire)) ok = true;
+    else delay(80);
+  }
+  if (!ok) return false;
+  
+  bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
+  bno08x.enableReport(SH2_ACCELEROMETER, 10000);
+  return true;
+}
+
+static void recover_bno08x_from_stall() {
+  clearI2CBus(); // Force the sensor to release the SDA line
+  delay(50);
+  
+  if (bno08x_begin_and_enable()) {
+    lastGameRotEventMs = millis();
+  }
+}
+
+// ==========================================
+// 6. SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
@@ -101,54 +156,49 @@ void setup() {
 
   // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
-  Wire.setClock(400000);
-  bool imu_ok = false;
-  for (int attempt = 0; attempt < 30 && !imu_ok; attempt++) {
-    if (bno08x.begin_I2C(0x4A, &Wire)) imu_ok = true;
-    else delay(100);
-  }
-  if (!imu_ok) {
-    while (1) { delay(100); }
+  Wire.setClock(50000); // 50kHz for long wire stability
+  
+  if (!bno08x_begin_and_enable()) {
+    while (1) { delay(100); } // Hang if totally dead on boot
   }
 
-  imu_ok = false;
-  for (int attempt = 0; attempt < 30 && !imu_ok; attempt++) {
-    if (bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000)) imu_ok = true;
-    else delay(100);
-  }
-  if (!bno08x.enableReport(SH2_ACCELEROMETER, 10000)) {
-    while (1) { delay(100); }
-  }
-  if (!imu_ok) {
-    while (1) { delay(100); }
-  }
+  lastGameRotEventMs = millis();
 }
 
 // ==========================================
-// 6. MAIN LOOP
+// 7. MAIN LOOP
 // ==========================================
 void loop() {
   handleSerialInput();
 
-  if (bno08x.getSensorEvent(&sensorValue)) {
+  // 1. Check for silent internal sensor resets
+  if (bno08x.wasReset()) {
+    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
+    bno08x.enableReport(SH2_ACCELEROMETER, 10000);
+    lastGameRotEventMs = millis();
+  }
+
+  // 2. Use 'while' to completely drain the FIFO queue of all pending events
+  while (bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
       case SH2_GAME_ROTATION_VECTOR:
         imu_qr = sensorValue.un.gameRotationVector.real;
         imu_qi = sensorValue.un.gameRotationVector.i;
         imu_qj = sensorValue.un.gameRotationVector.j;
         imu_qk = sensorValue.un.gameRotationVector.k;
+        lastGameRotEventMs = millis(); // Reset watchdog
         break;
         
       case SH2_ACCELEROMETER:
         float ax = sensorValue.un.accelerometer.x;
         float ay = sensorValue.un.accelerometer.y;
         float az = sensorValue.un.accelerometer.z;
-        // Calculate magnitude: sqrt(x^2 + y^2 + z^2)
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
         break;
     }
   }
-
+  
+  // 4. Run Controller
   uint32_t nowMicros = micros();
   if ((uint32_t)(nowMicros - lastControlMicros) >= CONTROL_PERIOD_US) {
     double dt = (nowMicros - lastControlMicros) / 1000000.0;
@@ -156,6 +206,7 @@ void loop() {
     runController(dt);
   }
 
+  // 5. Print Telemetry
   uint32_t nowMillis = millis();
   if ((uint32_t)(nowMillis - lastPrintMillis) >= PRINT_PERIOD_MS) {
     lastPrintMillis = nowMillis;
@@ -174,7 +225,7 @@ void loop() {
 }
 
 // ==========================================
-// 7. CONTROL LOOP
+// 8. CONTROL LOOP
 // ==========================================
 void runController(double dt) {
   if (dt <= 0.0) {
@@ -211,7 +262,7 @@ void runController(double dt) {
 }
 
 // ==========================================
-// 8. SERIAL INPUT (non-blocking: no readStringUntil timeout stalls)
+// 9. SERIAL INPUT (non-blocking)
 // ==========================================
 static void processSerialLine(char *line) {
   while (*line == ' ' || *line == '\t') line++;
@@ -239,6 +290,8 @@ static void processSerialLine(char *line) {
     SCB_AIRCR = 0x05FA0004;
   } else if (strcmp(line, "RESET_IMU") == 0) {
     sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
+  } else if (strcmp(line, "RESET_I2C") == 0) {
+    recover_bno08x_from_stall();
   } else {
     float a, b;
     if (sscanf(line, "%f,%f", &a, &b) == 2) {
@@ -271,7 +324,7 @@ void handleSerialInput() {
 }
 
 // ==========================================
-// 9. TELEMETRY
+// 10. TELEMETRY ENCODERS
 // ==========================================
 float readEncoder1() {
   long pos = enc1.read();
