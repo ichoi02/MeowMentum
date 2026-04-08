@@ -199,7 +199,7 @@ class TeensyInterface:
             s = c.decode("utf-8", errors="ignore").strip()
             if s:
                 latest_line = s
-        print(latest_line)
+        # print(latest_line)
         if latest_line:
             parts = latest_line.split(',')
             if len(parts) == 7:

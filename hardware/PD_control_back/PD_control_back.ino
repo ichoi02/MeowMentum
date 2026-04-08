@@ -191,14 +191,15 @@ void loop() {
   }
 
   // 2. Use 'while' to completely drain the FIFO queue of all pending events
-  while (bno08x.getSensorEvent(&sensorValue)) {
+  int imu_budget = 5; 
+  while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
       case SH2_GAME_ROTATION_VECTOR:
         imu_qr = sensorValue.un.gameRotationVector.real;
         imu_qi = sensorValue.un.gameRotationVector.i;
         imu_qj = sensorValue.un.gameRotationVector.j;
         imu_qk = sensorValue.un.gameRotationVector.k;
-        lastGameRotEventMs = millis(); // Reset watchdog
+        lastGameRotEventMs = millis(); 
         break;
         
       case SH2_ACCELEROMETER:
@@ -206,6 +207,7 @@ void loop() {
         float ay = sensorValue.un.accelerometer.y;
         float az = sensorValue.un.accelerometer.z;
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
+        lastGameRotEventMs = millis(); 
         break;
     }
   }
@@ -225,7 +227,7 @@ void loop() {
     
     float angle1 = readEncoder1();
     float angle2 = readEncoder2();
-
+    
     int n = snprintf(s_telemBuf, sizeof(s_telemBuf),
                      "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.4f\n",
                      imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2, acc_mag);
