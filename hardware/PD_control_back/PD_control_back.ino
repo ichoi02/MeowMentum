@@ -77,36 +77,48 @@ static const uint32_t IMU_RECOVER_COOLDOWN_MS = 2500;
 // 5. I2C RECOVERY FUNCTIONS
 // ==========================================
 
-// Manually sends 9 clock pulses to unstick a frozen BNO08x holding the SDA line low
 void clearI2CBus() {
   Wire.end();
   
   // Take manual control of the Teensy 4.0 default I2C pins
   pinMode(18, INPUT_PULLUP); // SDA
   pinMode(19, OUTPUT);       // SCL
+  digitalWrite(19, HIGH);
+  delay(1);
   
-  // Send 9 clock pulses to unstick the sensor
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(19, HIGH);
-    delayMicroseconds(5);
+  // Pulse SCL until the sensor releases the SDA line (max 20 pulses)
+  for (int i = 0; i < 20; i++) {
+    if (digitalRead(18) == HIGH) {
+      break; 
+    }
     digitalWrite(19, LOW);
-    delayMicroseconds(5);
+    delayMicroseconds(10);
+    digitalWrite(19, HIGH);
+    delayMicroseconds(10);
   }
   
-  // Give the bus a moment to settle, then restart I2C
+  // Release SCL to float HIGH
+  pinMode(19, INPUT_PULLUP); 
   delay(10);
+  
   Wire.begin();
-  Wire.setClock(50000); // Keep at 50kHz for long wires
+  
+  // Force a hardware timeout so the Wire library CANNOT freeze
+  Wire.setTimeout(1000); 
+  Wire.setClock(50000); 
 }
 
-// Re-initializes both reports (used during setup and recovery)
 static bool bno08x_begin_and_enable() {
   bool ok = false;
-  for (int attempt = 0; attempt < 25 && !ok; attempt++) {
+  
+  for (int attempt = 0; attempt < 5 && !ok; attempt++) {
     if (bno08x.begin_I2C(0x4A, &Wire)) ok = true;
-    else delay(80);
+    else delay(50);
   }
-  if (!ok) return false;
+  
+  if (!ok) {
+    return false;
+  }
   
   bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);
@@ -114,12 +126,12 @@ static bool bno08x_begin_and_enable() {
 }
 
 static void recover_bno08x_from_stall() {
-  clearI2CBus(); // Force the sensor to release the SDA line
+  clearI2CBus();
   delay(50);
   
   if (bno08x_begin_and_enable()) {
     lastGameRotEventMs = millis();
-  }
+  } 
 }
 
 // ==========================================
@@ -138,8 +150,8 @@ void setup() {
   pinMode(M2PWM, OUTPUT);
   pinMode(M2EN, OUTPUT);
 
-  digitalWrite(M1EN, HIGH);
-  digitalWrite(M2EN, HIGH);
+  digitalWrite(M1EN, LOW);
+  digitalWrite(M2EN, LOW);
 
   analogWriteFrequency(M1PWM, 20000);
   analogWriteFrequency(M2PWM, 20000);
@@ -197,7 +209,7 @@ void loop() {
         break;
     }
   }
-  
+
   // 4. Run Controller
   uint32_t nowMicros = micros();
   if ((uint32_t)(nowMicros - lastControlMicros) >= CONTROL_PERIOD_US) {
