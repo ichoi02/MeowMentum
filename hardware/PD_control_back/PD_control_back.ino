@@ -104,7 +104,7 @@ void clearI2CBus() {
   Wire.begin();
   
   // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(1000); 
+  Wire.setTimeout(10); 
   Wire.setClock(50000); 
 }
 
@@ -168,6 +168,7 @@ void setup() {
 
   // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
+  Wire.setTimeout(10); 
   Wire.setClock(50000); // 50kHz for long wire stability
   
   if (!bno08x_begin_and_enable()) {
@@ -190,7 +191,6 @@ void loop() {
     lastGameRotEventMs = millis();
   }
 
-  // 2. Use 'while' to completely drain the FIFO queue of all pending events
   int imu_budget = 5; 
   while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {

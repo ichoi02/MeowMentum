@@ -3,7 +3,7 @@
 #include <Adafruit_BNO08x.h>
 #include <cstdio>
 #include <cstring>
-#include <math.h> // Ensure sqrt() is available
+#include <math.h>
 
 const float M1GEAR = 9.68;
 const float M2GEAR = 9.68;
@@ -19,7 +19,6 @@ Encoder enc1(14, 15);
 // Motor 2
 const int M2INA = 7;
 const int M2INB = 8;
-// NOTE: PWM and EN pin swapped from original design
 const int M2PWM = 12;
 const int M2EN = 10;
 Encoder enc2(17, 16);
@@ -105,7 +104,7 @@ void clearI2CBus() {
   Wire.begin();
   
   // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(1000); 
+  Wire.setTimeout(10); 
   Wire.setClock(50000); 
 }
 
@@ -169,6 +168,7 @@ void setup() {
 
   // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
+  Wire.setTimeout(10); 
   Wire.setClock(50000); // 50kHz for long wire stability
   
   if (!bno08x_begin_and_enable()) {
@@ -191,7 +191,6 @@ void loop() {
     lastGameRotEventMs = millis();
   }
 
-  // 2. Use 'while' to completely drain the FIFO queue of all pending events
   int imu_budget = 5; 
   while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
@@ -200,16 +199,15 @@ void loop() {
         imu_qi = sensorValue.un.gameRotationVector.i;
         imu_qj = sensorValue.un.gameRotationVector.j;
         imu_qk = sensorValue.un.gameRotationVector.k;
-        lastGameRotEventMs = millis(); // Reset watchdog on successful rotation read
+        lastGameRotEventMs = millis(); 
         break;
         
       case SH2_ACCELEROMETER:
         float ax = sensorValue.un.accelerometer.x;
         float ay = sensorValue.un.accelerometer.y;
         float az = sensorValue.un.accelerometer.z;
-        // Calculate magnitude: sqrt(x^2 + y^2 + z^2)
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
-        lastGameRotEventMs = millis(); // Reset watchdog on successful accel read
+        lastGameRotEventMs = millis(); 
         break;
     }
   }

@@ -172,21 +172,25 @@ class TeensyInterface:
             return
 
         if waiting <= 0:
+            print(f"waiting")
             return
 
         max_bytes = min(waiting, 4096)
         try:
             raw = self.ser.read(max_bytes)
         except (OSError, serial.SerialException) as e:
+            print(f"serialexception")
             if self._is_serial_gone(e):
                 self.reopen_serial()
             return
 
         if not raw:
+            print(f"raw")
             return
 
         self._rx_remainder += raw
         if b"\n" not in self._rx_remainder:
+            print(f"remainder")
             if len(self._rx_remainder) > 8192:
                 self._rx_remainder = self._rx_remainder[-4096:]
             return
