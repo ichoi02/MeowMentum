@@ -199,7 +199,7 @@ class TeensyInterface:
             s = c.decode("utf-8", errors="ignore").strip()
             if s:
                 latest_line = s
-
+        print(latest_line)
         if latest_line:
             parts = latest_line.split(',')
             if len(parts) == 7:
@@ -274,16 +274,23 @@ def main():
     print("Connecting to boards...")
     front = TeensyInterface(path_front, "Front")
     back = TeensyInterface(path_back, "Back")
+    time.sleep(1) # Wait for serial connection to establish
+
+    print("Rebooting Teensy")
+    front.reboot_teensy()
+    back.reboot_teensy()
+    time.sleep(1)
+
+    path_front = get_port_by_sn(SN_FRONT)
+    path_back = get_port_by_sn(SN_BACK)
+    front = TeensyInterface(path_front, "Front")
+    back = TeensyInterface(path_back, "Back")
     print(f"{path_front}, {path_back}")
     time.sleep(1) # Wait for serial connection to establish
 
     # Stop all motors
     front.stop_all_motors()
     back.stop_all_motors()
-
-    # front.reboot_teensy()
-    # back.reboot_teensy()
-    # time.sleep(1)
 
     # --- ZERO THE ENCODERS ---
     print("Zeroing motor encoders...")
@@ -296,10 +303,10 @@ def main():
     back.reset_IMU()
     time.sleep(0.5)
 
-    print("Resetting I2C comms...")
-    front.reset_I2C()
-    back.reset_I2C()
-    time.sleep(0.5)
+    # print("Resetting I2C comms...")
+    # front.reset_I2C()
+    # back.reset_I2C()
+    # time.sleep(0.5)
     
     # Flush any stale data that was transmitted before the reset happened
     front.flush_input_safe()
