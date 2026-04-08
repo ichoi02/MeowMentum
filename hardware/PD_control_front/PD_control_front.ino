@@ -192,7 +192,8 @@ void loop() {
   }
 
   // 2. Use 'while' to completely drain the FIFO queue of all pending events
-  while (bno08x.getSensorEvent(&sensorValue)) {
+  int imu_budget = 5; 
+  while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
       case SH2_GAME_ROTATION_VECTOR:
         imu_qr = sensorValue.un.gameRotationVector.real;
