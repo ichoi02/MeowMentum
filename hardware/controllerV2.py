@@ -1,5 +1,8 @@
 import os
 from scipy.spatial.transform import Rotation as R
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Edge / Pi: ONNX probes GPU on load; keep stderr quiet (4 = fatal in typical ORT builds).
 os.environ.setdefault("ORT_LOG_SEVERITY_LEVEL", "4")
@@ -40,6 +43,7 @@ import argparse
 import numpy as np
 import csv
 import threading
+import cat_env.env_util as util
 
 # --- CONFIGURATION ---
 SN_FRONT = "18451300" 
@@ -172,25 +176,25 @@ class TeensyInterface:
             return
 
         if waiting <= 0:
-            print(f"waiting")
+            # print(f"waiting {self.name}")
             return
 
         max_bytes = min(waiting, 4096)
         try:
             raw = self.ser.read(max_bytes)
         except (OSError, serial.SerialException) as e:
-            print(f"serialexception")
+            # print(f"serialexception")
             if self._is_serial_gone(e):
                 self.reopen_serial()
             return
 
         if not raw:
-            print(f"raw")
+            # print(f"raw")
             return
 
         self._rx_remainder += raw
         if b"\n" not in self._rx_remainder:
-            print(f"remainder")
+            # print(f"remainder")
             if len(self._rx_remainder) > 8192:
                 self._rx_remainder = self._rx_remainder[-4096:]
             return
@@ -203,6 +207,7 @@ class TeensyInterface:
             s = c.decode("utf-8", errors="ignore").strip()
             if s:
                 latest_line = s
+        # print(self.name)
         # print(latest_line)
         if latest_line:
             parts = latest_line.split(',')
@@ -282,8 +287,11 @@ def main():
 
     print("Rebooting Teensy")
     front.reboot_teensy()
+    front.ser.close()
+    time.sleep(2)
     back.reboot_teensy()
-    time.sleep(1)
+    back.ser.close()
+    time.sleep(2)
 
     path_front = get_port_by_sn(SN_FRONT)
     path_back = get_port_by_sn(SN_BACK)
@@ -315,21 +323,21 @@ def main():
     # Flush any stale data that was transmitted before the reset happened
     front.flush_input_safe()
     back.flush_input_safe()
+    time.sleep(0.5)
 
-    print("Press any key to start.")
+    print("Press enter to start.")
     input()
-    # front.start_all_motors()
-    # back.start_all_motors()
+    front.start_all_motors()
+    back.start_all_motors()
 
-    # if not args.debug:
-    #     print("Loading ONNX Model...")
-    #     import onnxruntime as ort
-    #     try:
-    #         ort.set_default_logger_severity(3)
-    #     except (AttributeError, TypeError):
-    #         pass
-    #     # FIXME: Replace with your actual model filename if different
-    #     ort_session = ort.InferenceSession("cat_controller.onnx")
+    if not args.debug:
+        print("Loading ONNX Model...")
+        import onnxruntime as ort
+        try:
+            ort.set_default_logger_severity(3)
+        except (AttributeError, TypeError):
+            parse_args
+        ort_session = ort.InferenceSession("cat_controller.onnx")
     
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
@@ -340,6 +348,25 @@ def main():
         threading.Thread(target=keyboard_input_thread, daemon=True).start()
 
     print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
+
+    if not args.debug:
+        print("Waiting for drop..")
+        while(True):
+            loop_start = time.time()
+            front.update_sensor_data()
+            
+            if front.acc_mag < 7.0:
+                print("Drop")
+                drop_started = time.time()
+                break
+            
+            elapsed = time.time() - loop_start
+            if elapsed < loop_period:
+                time.sleep(loop_period - elapsed)
+            else:
+                print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
+
+
     try:
         while(True): # FIXME: need to limit running time
             loop_start = time.time()
@@ -353,7 +380,11 @@ def main():
             if args.debug:
                 action = list(debug_action) 
             else:
-                # TODO: add onnx control here
+                front_rot = util.to_rotation_matrix(front.quat)
+                back_rot = util.to_rotation_matrix(back.quat)
+                joints = np.array([front.m1_rad, front.m2_rad, back.m2_rad, back.m1_rad])
+                obs = np.hstack((front_rot, back_rot, joints))
+                # print(obs)
                 pass
 
             front.set_motors(action[0], action[1])
@@ -377,6 +408,8 @@ def main():
                 time.sleep(loop_period - elapsed)
             else:
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
+            if time.time() - drop_started > 1.0:
+                raise KeyboardInterrupt
 
     except KeyboardInterrupt:
         print("\nExiting...")
