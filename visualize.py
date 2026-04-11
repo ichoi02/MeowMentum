@@ -7,8 +7,8 @@ import os
 
 def load_telemetry_csv(filepath):
     columns = [
-        "Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "Cmd_F1", "Cmd_F2", 
-        "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "Cmd_B1", "Cmd_B2"
+        "Time", "F_Q0", "F_Q1", "F_Q2", "F_Q3", "F_M1", "F_M2", "F_ACC",  "Cmd_F1", "Cmd_F2", 
+        "B_Q0", "B_Q1", "B_Q2", "B_Q3", "B_M1", "B_M2", "B_ACC",  "Cmd_B1", "Cmd_B2"
     ]
     
     df = pd.read_csv(filepath, usecols=columns)
@@ -17,6 +17,8 @@ def load_telemetry_csv(filepath):
     rear_quats = df[["B_Q0", "B_Q1", "B_Q2", "B_Q3"]].to_numpy()
     rot1 = df["F_M1"].to_numpy()
     pitch = df["F_M2"].to_numpy()
+    acc1 = df["F_ACC"].to_numpy()
+    acc2 = df["B_ACC"].to_numpy()
     rot2 = df["B_M2"].to_numpy()
     tail = df["B_M1"].to_numpy()
     time = df["Time"].to_numpy()
@@ -28,7 +30,9 @@ def load_telemetry_csv(filepath):
         "rot1": rot1,
         "pitch": pitch,
         "rot2": rot2,
-        "tail": tail
+        "tail": tail,
+        "acc1": acc1,
+        "acc2": acc2
     }
 
 def visualize():
@@ -51,7 +55,7 @@ def visualize():
     }
 
     # Load telemetry
-    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775339019.csv")
+    telemetry = load_telemetry_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775940539.csv")
     num_steps = len(telemetry["front_quat"])
     fps = 100
     
@@ -72,7 +76,7 @@ def visualize():
             data.qpos[0:3] = [0, 0, 3] 
             
             # Root orientation: quat - (w, x, y, z)
-            data.qpos[3:7] = np.array([1,0,0,0])#telemetry["front_quat"][step]
+            data.qpos[3:7] = telemetry["front_quat"][step]
             
             # Joint angles
             data.qpos[joint_qpos_idx["rot1"]] = telemetry["rot1"][step]
@@ -86,7 +90,7 @@ def visualize():
             # Snap the ghost's position to the simulated rear body's position
             data.mocap_pos[ghost_mocap_id] = data.xpos[real_rear_body_id]
             # Set the ghost's orientation purely from the rear IMU telemetry
-            data.mocap_quat[ghost_mocap_id] = np.array([1,0,0,0])#telemetry["rear_quat"][step]
+            data.mocap_quat[ghost_mocap_id] = telemetry["rear_quat"][step]
             
             viewer.sync()
             time.sleep(1.0 / fps)

@@ -21,7 +21,7 @@ class StudentPolicy(nn.Module):
 # --- Configuration ---
 # Update these dimensions to match your specific observation and action spaces
 STATE_DIM = 22
-ACTION_DIM = 4  
+ACTION_DIM = 3
 PTH_FILE = "student_policy.pth"
 ONNX_FILE = "cat_controller.onnx"
 

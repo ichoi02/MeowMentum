@@ -21,7 +21,7 @@
     <geom name="floor" type="plane" size="0 0 0.05" material="grey"/>
 
     <body name="rear_ghost" mocap="true">
-        <geom type="box" size="0.05 0.05 0.05" rgba="1 0 0 0.5" contype="0" conaffinity="0"/>
+        <geom type="box" size="0.06 0.06 0.06" rgba="1 0 0 0.5" contype="0" conaffinity="0"/>
     </body>
 
     <body name="front_body" pos="0 0 3" euler="0 0 0">
