@@ -55,6 +55,19 @@ SERIAL_DRAIN_MAX_LINES = 32
 front_roll_sign = -1.0
 rear_roll_sign = +1.0
 
+# Phase Number
+PHASE_BEND_SPINE = 0
+PHASE_RIGHTING = 1
+PHASE_SETTLE = 2
+
+# Phase Config
+spine_target = 87.0   # for PHASE_BEND_SPINE (deg)
+spine_target_threshold = 8.0   # How close to target before switching to next phase (deg)
+roll_threshold = 5.0   # Below this err move to settle phase. (deg)
+
+# Gains
+Kp_settle_roll = 0.8
+Kp_settle_roll_diff = 0.3
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -286,14 +299,14 @@ def get_joint_state(front, back):
 
 # Convert quaternions to euler angles (roll, pitch, yaw)   
 # euler(radians)
-def quat_wxyz_to_euler_xyz(q_wyxz):
-    r = R.from_quat(q_wyxz, scalar_first=True)
+def quat_wxyz_to_euler_xyz(q_wxyz):
+    r = R.from_quat(q_wxyz, scalar_first=True)
     return r.as_euler('xyz', degrees=False)
 
 # Compute Rear roll angle error (world frame) 
 # Just getting rear roll angle. Would be equal to error.
 def compute_roll_error(state):
-    roll_back, pitch_back, yaw_back = quat_wxyz_to_euler_xyz(state["quat_back"])
+    roll_back, _, _ = quat_wxyz_to_euler_xyz(state["quat_back"])
     return roll_back
 
 # Coupled roll / Rear and front body roll differnece.
@@ -369,6 +382,7 @@ def main():
 
     print("Press any key to start.")
     input()
+
     front.start_all_motors()
     back.start_all_motors()
 
@@ -385,6 +399,9 @@ def main():
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
     log = []
+
+    # Set Initial Phase    
+    phase = PHASE_BEND_SPINE
     
     if args.debug:
         print("Debug mode initiated: enter '[motor num] [target angle]'")
@@ -392,7 +409,7 @@ def main():
 
     print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
     try:
-        while(True): # FIXME: need to limit running time
+        while(True): # FIXME: need to limit running time  >>>이거 넣었니 이탁아?
             loop_start = time.time()
             t = loop_start - start_time
 
@@ -404,8 +421,49 @@ def main():
             if args.debug:
                 action = list(debug_action) 
             else:
-                # TODO: add onnx control here
-                pass
+                # Phase Controller
+                state = get_joint_state(front, back)
+                state = compute_derived_state(state)
+                roll_err = compute_roll_error(state)
+
+                cmd_front_roll = 0.0
+                cmd_rear_roll = 0.0
+                cmd_spine = 0.0
+                cmd_tail = 0.0
+
+                if phase == PHASE_BEND_SPINE:
+                    cmd_front_roll = 0.0
+                    cmd_rear_roll = 0.0
+                    cmd_spine = np.deg2rad(spine_target)
+                    cmd_tail = 0.0
+
+                    if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
+                        phase = PHASE_RIGHTING
+
+                elif phase == PHASE_RIGHTING:
+                    u_roll = -1.0 * roll_err 
+                    cmd_front_roll = front_roll_sign * u_roll
+                    cmd_rear_roll = rear_roll_sign * u_roll
+                    cmd_spine = np.deg2rad(spine_target)
+                    cmd_tail = 0.0
+
+                    if abs(roll_err) < np.deg2rad(roll_threshold): 
+                        phase = PHASE_SETTLE  
+
+                # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
+                elif phase == PHASE_SETTLE:
+                    u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
+                    cmd_front_roll = front_roll_sign * u_roll
+                    cmd_rear_roll = rear_roll_sign * u_roll
+                    cmd_spine = 0.0
+                    cmd_tail = 0.0
+
+                cmd_front_roll = np.clip(cmd_front_roll, -6.28, 6.28)
+                cmd_rear_roll  = np.clip(cmd_rear_roll,  -6.28, 6.28)
+                cmd_tail       = np.clip(cmd_tail,       -1.55, 1.55)
+                cmd_spine      = np.clip(cmd_spine,      -1.55, 1.55)
+
+                action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]  
 
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
