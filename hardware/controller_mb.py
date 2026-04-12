@@ -402,6 +402,9 @@ def main():
 
     # Set Initial Phase    
     phase = PHASE_BEND_SPINE
+
+    # Debug print timer
+    last_debug_print = 0.0
     
     if args.debug:
         print("Debug mode initiated: enter '[motor num] [target angle]'")
@@ -418,13 +421,22 @@ def main():
             
             action = [0, 0, 0, 0]
 
+            roll_err_log = float("nan")
+            phi_diff_log = float("nan")
+            phi_coupl_log = float("nan")
+
             if args.debug:
                 action = list(debug_action) 
             else:
-                # Phase Controller
+                ## Phase Controller
                 state = get_joint_state(front, back)
                 state = compute_derived_state(state)
                 roll_err = compute_roll_error(state)
+
+                # Logging for debug
+                roll_err_log = roll_err
+                phi_diff_log = state["phi_diff"]
+                phi_coupl_log = state["phi_coupl"]
 
                 cmd_front_roll = 0.0
                 cmd_rear_roll = 0.0
@@ -465,8 +477,27 @@ def main():
 
                 action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]  
 
+            # Logging for debug    
+            phase_log = phase
+            cmd_front_roll_log = action[0]
+            cmd_spine_log      = action[1]
+            cmd_tail_log       = action[2]
+            cmd_rear_roll_log  = action[3]
+
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
+
+            # Debug print
+            if t - last_debug_print >= 0.1:   # print every 0.1 s
+                print(
+                    f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | "
+                    f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
+                    f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
+                    f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
+                )
+                last_debug_print = t
+
+
 
             log.append([
                 round(t, 4),
@@ -480,6 +511,7 @@ def main():
                 back.m1_rad, back.m2_rad,
                 back.acc_mag,
                 action[2], action[3],
+
             ])
 
             # Enforce timing
