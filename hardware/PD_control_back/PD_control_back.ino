@@ -192,6 +192,7 @@ void loop() {
   if (bno08x.wasReset()) {
     bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
     bno08x.enableReport(SH2_ACCELEROMETER, 10000);
+    bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, 10000);
     lastGameRotEventMs = millis();
   }
 
