@@ -51,6 +51,11 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
+# Drop Trigger
+USE_DROP_TRIGGER = True
+Drop_acc_threshold = 7.0   # m/s^2
+time_max = 3.0
+
 # Front and Rear Roll Sign Difference
 front_roll_sign = -1.0
 rear_roll_sign = +1.0
@@ -403,6 +408,9 @@ def main():
     # Set Initial Phase    
     phase = PHASE_BEND_SPINE
 
+    controller_started = False
+    controller_start_time = None
+
     # Debug print timer
     last_debug_print = 0.0
     
@@ -416,6 +424,7 @@ def main():
             loop_start = time.time()
             t = loop_start - start_time
 
+
             front.update_sensor_data()
             back.update_sensor_data()
             
@@ -428,54 +437,76 @@ def main():
             if args.debug:
                 action = list(debug_action) 
             else:
-                ## Phase Controller
-                state = get_joint_state(front, back)
-                state = compute_derived_state(state)
-                roll_err = compute_roll_error(state)
+                # Before trigger : Hold [0 0 0 0] Pose
+                if USE_DROP_TRIGGER and not controller_started:
+                    action = [0, 0, 0, 0]
 
-                # Logging for debug
-                roll_err_log = roll_err
-                phi_diff_log = state["phi_diff"]
-                phi_coupl_log = state["phi_coupl"]
+                    # Controller On : Beging Bend Spine Phase
+                    if back.acc_mag < Drop_acc_threshold:
+                        controller_started = True
+                        controller_start_time = loop_start
+                        phase = PHASE_BEND_SPINE
+                        print(f"DROP TRIGGERED at t={t:.3f}s | acc_trigger_mag={back.acc_mag:.3f}")
 
-                cmd_front_roll = 0.0
-                cmd_rear_roll = 0.0
-                cmd_spine = 0.0
-                cmd_tail = 0.0
+                else:
+                    # After trigger : Run Controller
 
-                if phase == PHASE_BEND_SPINE:
+                    # timeout measured from controller start
+                    ctrl_t = loop_start - controller_start_time if controller_start_time is not None else 0.0
+                    if ctrl_t >= time_max:
+                        print(f"Timeout reached ({time_max:.1f} s after trigger). Stopping...")
+                        front.stop_all_motors()
+                        back.stop_all_motors()
+                        break
+
+                    ## Phase Controller
+                    state = get_joint_state(front, back)
+                    state = compute_derived_state(state)
+                    roll_err = compute_roll_error(state)
+
+                    # Logging for debug
+                    roll_err_log = roll_err
+                    phi_diff_log = state["phi_diff"]
+                    phi_coupl_log = state["phi_coupl"]
+
                     cmd_front_roll = 0.0
                     cmd_rear_roll = 0.0
-                    cmd_spine = np.deg2rad(spine_target)
-                    cmd_tail = 0.0
-
-                    if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
-                        phase = PHASE_RIGHTING
-
-                elif phase == PHASE_RIGHTING:
-                    u_roll = -1.0 * roll_err 
-                    cmd_front_roll = front_roll_sign * u_roll
-                    cmd_rear_roll = rear_roll_sign * u_roll
-                    cmd_spine = np.deg2rad(spine_target)
-                    cmd_tail = 0.0
-
-                    if abs(roll_err) < np.deg2rad(roll_threshold): 
-                        phase = PHASE_SETTLE  
-
-                # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
-                elif phase == PHASE_SETTLE:
-                    u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
-                    cmd_front_roll = front_roll_sign * u_roll
-                    cmd_rear_roll = rear_roll_sign * u_roll
                     cmd_spine = 0.0
                     cmd_tail = 0.0
 
-                cmd_front_roll = np.clip(cmd_front_roll, -6.28, 6.28)
-                cmd_rear_roll  = np.clip(cmd_rear_roll,  -6.28, 6.28)
-                cmd_tail       = np.clip(cmd_tail,       -1.55, 1.55)
-                cmd_spine      = np.clip(cmd_spine,      -1.55, 1.55)
+                    if phase == PHASE_BEND_SPINE:
+                        cmd_front_roll = 0.0
+                        cmd_rear_roll = 0.0
+                        cmd_spine = np.deg2rad(spine_target)
+                        cmd_tail = 0.0
 
-                action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]  
+                        if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
+                            phase = PHASE_RIGHTING
+
+                    elif phase == PHASE_RIGHTING:
+                        u_roll = -1.0 * roll_err 
+                        cmd_front_roll = front_roll_sign * u_roll
+                        cmd_rear_roll = rear_roll_sign * u_roll
+                        cmd_spine = np.deg2rad(spine_target)
+                        cmd_tail = 0.0
+
+                        if abs(roll_err) < np.deg2rad(roll_threshold): 
+                            phase = PHASE_SETTLE  
+
+                    # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
+                    elif phase == PHASE_SETTLE:
+                        u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
+                        cmd_front_roll = front_roll_sign * u_roll
+                        cmd_rear_roll = rear_roll_sign * u_roll
+                        cmd_spine = 0.0
+                        cmd_tail = 0.0
+
+                    cmd_front_roll = np.clip(cmd_front_roll, -6.28, 6.28)
+                    cmd_rear_roll  = np.clip(cmd_rear_roll,  -6.28, 6.28)
+                    cmd_tail       = np.clip(cmd_tail,       -1.55, 1.55)
+                    cmd_spine      = np.clip(cmd_spine,      -1.55, 1.55)
+
+                    action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]  
 
             # Logging for debug    
             phase_log = phase
