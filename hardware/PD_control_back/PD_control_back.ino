@@ -9,6 +9,9 @@ const float M1GEAR = 9.68;
 const float M2GEAR = 9.68;
 const int TICKS_PER_REV = 48;
 
+// Rear Motor : M2 - Rear_Roll, M1 - Tail_Pitch  
+
+
 // Motor 1
 const int M1INA = 2;
 const int M1INB = 4;
@@ -50,7 +53,7 @@ const int PWM_MAX = 1023;
 // Fixed control frequency
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
-const uint32_t PRINT_PERIOD_MS = 50;
+const uint32_t PRINT_PERIOD_MS = 50;   //이거 만약 문제되면 나중에 수정해도 대나? 10정도로? 20hz 좀 너무 느린거 같기도.
 static char s_telemBuf[128];
 
 // ==========================================
@@ -67,6 +70,7 @@ uint32_t lastPrintMillis = 0;
 // global IMU
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
 float acc_mag = 0.0;
+float gyro_x = 0.0, gyro_y = 0.0, gyro_z = 0.0; // gyro added
 
 // Watchdog variables for I2C freeze recovery
 static uint32_t lastGameRotEventMs = 0;
@@ -122,6 +126,7 @@ static bool bno08x_begin_and_enable() {
   
   bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);
+  bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, 10000); // Gyro data
   return true;
 }
 
@@ -209,6 +214,14 @@ void loop() {
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
         lastGameRotEventMs = millis(); 
         break;
+
+       
+      case SH2_GYROSCOPE_CALIBRATED:
+        gyro_x = sensorValue.un.gyroscope.x;
+        gyro_y = sensorValue.un.gyroscope.y;
+        gyro_z = sensorValue.un.gyroscope.z;
+        lastGameRotEventMs = millis();
+        break; 
     }
   }
 
@@ -229,8 +242,8 @@ void loop() {
     float angle2 = readEncoder2();
     
     int n = snprintf(s_telemBuf, sizeof(s_telemBuf),
-                     "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.4f\n",
-                     imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2, acc_mag);
+                     "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.4f\n",
+                     imu_qr, imu_qi, imu_qj, imu_qk, gyro_x, gyro_y, gyro_z, angle1, angle2, acc_mag);
     if (n > 0 && n < (int)sizeof(s_telemBuf) &&
         Serial.availableForWrite() >= n) {
       Serial.write((const uint8_t *)s_telemBuf, (size_t)n);
