@@ -51,6 +51,10 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
+# Front and Rear Roll Sign Difference
+front_roll_sign = -1.0
+rear_roll_sign = +1.0
+
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -239,11 +243,13 @@ class TeensyInterface:
         aligned_wxyz = r_global.as_quat(scalar_first=True)
         return aligned_wxyz.squeeze(0)
 
+
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
         if port.serial_number == serial_number:
             return port.device
     return None
+
 
 def keyboard_input_thread():
     global debug_action
@@ -257,6 +263,37 @@ def keyboard_input_thread():
                 print(f"Updated Motor {motor_num} to {target_angle}")
         except Exception as e:
             print(f"Invalid input. Try again. ({e})")
+
+# Will be adding some more func for model-based controller
+def get_joint_state(front, back):
+    q_front_roll = front.m1_rad
+    q_spine      = front.m2_rad
+    q_tail       = back.m1_rad
+    q_rear_roll  = back.m2_rad
+
+    return {
+        "q_front_roll": q_front_roll,
+        "q_spine": q_spine,
+        "q_tail": q_tail,
+        "q_rear_roll": q_rear_roll,
+        "quat_front": np.asarray(front.quat, dtype=float),
+        "quat_back":  np.asarray(back.quat, dtype=float),
+        "gyro_front": np.asarray(front.gyro, dtype=float),
+        "gyro_back":  np.asarray(back.gyro, dtype=float),
+        "acc_front": float(front.acc_mag),
+        "acc_back":  float(back.acc_mag),
+    }
+
+
+def compute_derived_state(state):
+    qf = state["q_front_roll"]
+    qr = state["q_rear_roll"]
+
+    phi_coupl = 0.5 * (front_roll_sign * qf + rear_roll_sign * qr)   # Coupled roll component (rad)   
+    phi_diff = 0.5 * (front_roll_sign * qf - rear_roll_sign * qr)    # Front and rear body roll difference
+
+    return {**state, "phi_coupl": phi_coupl, "phi_diff": phi_diff}
+
 
 def main():
     parser = argparse.ArgumentParser(description="Teensy Control Loop with Telemetry Logging")
