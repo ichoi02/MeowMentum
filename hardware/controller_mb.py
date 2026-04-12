@@ -264,7 +264,7 @@ def keyboard_input_thread():
         except Exception as e:
             print(f"Invalid input. Try again. ({e})")
 
-# Will be adding some more func for model-based controller
+######## Will be adding some more func for model-based controller
 def get_joint_state(front, back):
     q_front_roll = front.m1_rad
     q_spine      = front.m2_rad
@@ -284,15 +284,30 @@ def get_joint_state(front, back):
         "acc_back":  float(back.acc_mag),
     }
 
+# Convert quaternions to euler angles (roll, pitch, yaw)   
+# euler(radians)
+def quat_wxyz_to_euler_xyz(q_wyxz):
+    r = R.from_quat(q_wyxz, scalar_first=True)
+    return r.as_euler('xyz', degrees=False)
 
+# Compute Rear roll angle error (world frame) 
+# Just getting rear roll angle. Would be equal to error.
+def compute_roll_error(state):
+    roll_back, pitch_back, yaw_back = quat_wxyz_to_euler_xyz(state["quat_back"])
+    return roll_back
+
+# Coupled roll / Rear and front body roll differnece.
 def compute_derived_state(state):
     qf = state["q_front_roll"]
     qr = state["q_rear_roll"]
 
     phi_coupl = 0.5 * (front_roll_sign * qf + rear_roll_sign * qr)   # Coupled roll component (rad)   
-    phi_diff = 0.5 * (front_roll_sign * qf - rear_roll_sign * qr)    # Front and rear body roll difference
+    phi_diff = (front_roll_sign * qf - rear_roll_sign * qr)    # Front and rear body roll difference
 
     return {**state, "phi_coupl": phi_coupl, "phi_diff": phi_diff}
+
+
+########
 
 
 def main():
