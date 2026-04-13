@@ -403,7 +403,8 @@ def main():
                 roll = util.map_value(float(raw_action[0]), -1, 1, -np.pi*2, np.pi*2) # roll
                 pitch = util.map_value(float(raw_action[1]), -1, 1, -np.pi/2, np.pi/2) # pitch
                 tail = util.map_value(float(raw_action[2]), -1, 1, -np.pi/2, np.pi/2) # tail
-                action = [roll, pitch, -roll, tail]
+                
+                action = [roll, pitch, tail, -roll]
                 print(action)
 
             front.set_motors(action[0], action[1])
