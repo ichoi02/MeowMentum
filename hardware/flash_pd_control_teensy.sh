@@ -83,7 +83,7 @@ _strip_openblas_preload
 
 FQBN="${FQBN:-teensy:avr:teensy40}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTROLLER_PY="${SCRIPT_DIR}/controller.py"
+CONTROLLER_PY="${SCRIPT_DIR}/controllerV2.py"
 # Shared default so compile / compile-only / flash-only use the same tree without exporting env.
 DEFAULT_BUILD_ROOT="${SCRIPT_DIR}/.pd_teensy_build"
 

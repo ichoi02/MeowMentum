@@ -114,7 +114,7 @@ class TeensyInterface:
         self.quat = [1.0, 0.0, 0.0, 0.0] 
         self.m1_rad = 0.0
         self.m2_rad = 0.0
-        self.acc_mag = 0.0
+        self.acc_mag = 9.8
 
     def reset_encoders(self):
         """Sends the command to zero out the hardware encoder counts."""
@@ -324,11 +324,6 @@ def main():
     front.flush_input_safe()
     back.flush_input_safe()
     time.sleep(0.5)
-
-    print("Press enter to start.")
-    input()
-    # front.start_all_motors()
-    # back.start_all_motors()
     
     input_name = None
     if not args.debug:
@@ -342,7 +337,12 @@ def main():
         ort_session = ort.InferenceSession("cat_controller.onnx")
         # Fetch the exact input name defined during your PyTorch export
         input_name = ort_session.get_inputs()[0].name 
-    
+
+    front.start_all_motors()
+    back.start_all_motors()
+    print("Press enter to start.")
+    input()
+
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
     log = []
@@ -358,8 +358,8 @@ def main():
         while(True):
             loop_start = time.time()
             front.update_sensor_data()
-            
-            if front.acc_mag < 7.0:
+            print(front.acc_mag)
+            if front.acc_mag < 1.0:
                 print("Drop")
                 drop_started = time.time()
                 break
@@ -386,8 +386,8 @@ def main():
                 action = list(debug_action)
                 front_rot = util.to_rotation_matrix(front.quat)
                 back_rot = util.to_rotation_matrix(back.quat)
-                print("Front Rot:", np.round(front_rot, 2))
-                print("Back Rot:", np.round(back_rot, 2))
+                # print("Front Rot:", np.round(front_rot, 2))
+                # print("Back Rot:", np.round(back_rot, 2))
             else:
                 front_rot = util.to_rotation_matrix(front.quat)
                 back_rot = util.to_rotation_matrix(back.quat)
@@ -433,7 +433,7 @@ def main():
             else:
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
                 
-            if time.time() - drop_started > 1.0:
+            if time.time() - drop_started > 0.6:
                 raise KeyboardInterrupt
 
     except KeyboardInterrupt:
