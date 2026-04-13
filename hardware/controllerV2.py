@@ -329,27 +329,31 @@ def main():
     input()
     front.start_all_motors()
     back.start_all_motors()
-
+    
+    input_name = None
     if not args.debug:
         print("Loading ONNX Model...")
         import onnxruntime as ort
         try:
             ort.set_default_logger_severity(3)
         except (AttributeError, TypeError):
-            parse_args
+            pass # FIXED: Changed 'parse_args' to 'pass'
+        
         ort_session = ort.InferenceSession("cat_controller.onnx")
+        # Fetch the exact input name defined during your PyTorch export
+        input_name = ort_session.get_inputs()[0].name 
     
     loop_period = 1.0 / LOOP_HZ
     start_time = time.time()
     log = []
     
+    # FIXED: Initialize drop_started so debug mode doesn't crash
+    drop_started = float('inf') 
+
     if args.debug:
         print("Debug mode initiated: enter '[motor num] [target angle]'")
         threading.Thread(target=keyboard_input_thread, daemon=True).start()
-
-    print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
-
-    if not args.debug:
+    else:
         print("Waiting for drop..")
         while(True):
             loop_start = time.time()
@@ -366,9 +370,10 @@ def main():
             else:
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
 
+    print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
 
     try:
-        while(True): # FIXME: need to limit running time
+        while(True): 
             loop_start = time.time()
             t = loop_start - start_time
 
@@ -382,10 +387,24 @@ def main():
             else:
                 front_rot = util.to_rotation_matrix(front.quat)
                 back_rot = util.to_rotation_matrix(back.quat)
+                # Ensure the joint array matches the exact order used in simulation
                 joints = np.array([front.m1_rad, front.m2_rad, back.m2_rad, back.m1_rad])
+                
+                # Stack to create a flat 1D array
                 obs = np.hstack((front_rot, back_rot, joints))
-                # print(obs)
-                pass
+                
+                # Cast to float32 and add the batch dimension (1, N) for ONNX
+                obs_tensor = np.array(obs, dtype=np.float32).reshape(1, -1)
+                
+                # Run inference
+                # [0] gets the first output node, [0] unpacks the batch dimension
+                raw_action = ort_session.run(None, {input_name: obs_tensor})[0][0]
+                
+                roll = util.map_value(float(raw_action[0]), -1, 1, -np.pi*2, np.pi*2) # roll
+                pitch = util.map_value(float(raw_action[1]), -1, 1, -np.pi/2, np.pi/2) # pitch
+                tail = util.map_value(float(raw_action[2]), -1, 1, -np.pi/2, np.pi/2) # tail
+                action = [roll, pitch, -roll, tail]
+                print(action)
 
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
@@ -408,6 +427,7 @@ def main():
                 time.sleep(loop_period - elapsed)
             else:
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
+                
             if time.time() - drop_started > 1.0:
                 raise KeyboardInterrupt
 
