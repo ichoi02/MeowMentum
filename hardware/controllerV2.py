@@ -327,8 +327,8 @@ def main():
 
     print("Press enter to start.")
     input()
-    front.start_all_motors()
-    back.start_all_motors()
+    # front.start_all_motors()
+    # back.start_all_motors()
     
     input_name = None
     if not args.debug:
@@ -383,7 +383,11 @@ def main():
             action = [0, 0, 0, 0]
 
             if args.debug:
-                action = list(debug_action) 
+                action = list(debug_action)
+                front_rot = util.to_rotation_matrix(front.quat)
+                back_rot = util.to_rotation_matrix(back.quat)
+                print("Front Rot:", np.round(front_rot, 2))
+                print("Back Rot:", np.round(back_rot, 2))
             else:
                 front_rot = util.to_rotation_matrix(front.quat)
                 back_rot = util.to_rotation_matrix(back.quat)
@@ -403,7 +407,7 @@ def main():
                 roll = util.map_value(float(raw_action[0]), -1, 1, -np.pi*2, np.pi*2) # roll
                 pitch = util.map_value(float(raw_action[1]), -1, 1, -np.pi/2, np.pi/2) # pitch
                 tail = util.map_value(float(raw_action[2]), -1, 1, -np.pi/2, np.pi/2) # tail
-                
+
                 action = [roll, pitch, tail, -roll]
                 print(action)
 
