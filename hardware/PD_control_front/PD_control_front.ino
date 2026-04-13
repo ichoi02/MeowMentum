@@ -53,7 +53,7 @@ const int PWM_MAX = 1023;
 // Fixed control frequency
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
-const uint32_t PRINT_PERIOD_MS = 50;
+const uint32_t PRINT_PERIOD_MS = 20;
 static char s_telemBuf[128];
 
 // ==========================================

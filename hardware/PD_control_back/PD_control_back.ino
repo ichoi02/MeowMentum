@@ -53,7 +53,7 @@ const int PWM_MAX = 1023;
 // Fixed control frequency
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
-const uint32_t PRINT_PERIOD_MS = 50;   //이거 만약 문제되면 나중에 수정해도 대나? 10정도로? 20hz 좀 너무 느린거 같기도.
+const uint32_t PRINT_PERIOD_MS = 20;   //이거 만약 문제되면 나중에 수정해도 대나? 10정도로? 20hz 좀 너무 느린거 같기도.
 static char s_telemBuf[128];
 
 // ==========================================
