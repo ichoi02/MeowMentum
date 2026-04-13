@@ -27,3 +27,17 @@ def add_rotational_noise(rot_matrices_flat, std_dev=0.01):
     original_rotations = R.from_matrix(rot_matrices)
     noisy_rotations = noise_rotations * original_rotations
     return noisy_rotations.as_matrix().flatten()
+
+def reverse_align_imu_quaternions(aligned_wxyz, imu_type):
+    r_global = R.from_quat(aligned_wxyz, scalar_first=True)
+    
+    if imu_type == 'Front':
+        r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
+        
+    elif imu_type == 'Back':
+        r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
+        
+    r_raw = r_global * r_align.inv()
+    
+    raw_wxyz = r_raw.as_quat(scalar_first=True)
+    return raw_wxyz

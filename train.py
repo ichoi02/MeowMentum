@@ -16,7 +16,7 @@ def train():
         )
 
     model.learn(
-        total_timesteps=2000000,
+        total_timesteps=1000000,
         log_interval=10,
         progress_bar=True
         )

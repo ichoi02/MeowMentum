@@ -52,7 +52,7 @@ const int PWM_MAX = 1023;
 // Fixed control frequency
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
-const uint32_t PRINT_PERIOD_MS = 50;
+const uint32_t PRINT_PERIOD_MS = 20;
 static char s_telemBuf[128];
 
 // ==========================================
@@ -121,6 +121,10 @@ static bool bno08x_begin_and_enable() {
   if (!ok) {
     return false;
   }
+  
+  // Quaternion for Roll=0, Pitch=0, Yaw=90
+  sh2_Quaternion_t front_orientation = {0.0f, 0.0f, 0.7071068f, 0.7071068f}; // x, y, z, w
+  sh2_setReorientation(&front_orientation);
   
   bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);

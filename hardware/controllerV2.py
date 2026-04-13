@@ -214,7 +214,7 @@ class TeensyInterface:
             if len(parts) == 7:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
-                    self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
+                    # self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                     self.acc_mag = float(parts[6])
