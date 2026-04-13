@@ -53,8 +53,8 @@ SERIAL_DRAIN_MAX_LINES = 32
 
 # Drop Trigger
 USE_DROP_TRIGGER = True
-Drop_acc_threshold = 7.0   # m/s^2
-time_max = 3.0
+drop_acc_threshold = 7.0   # m/s^2
+time_max = 10.0            
 
 # Front and Rear Roll Sign Difference
 front_roll_sign = -1.0
@@ -131,7 +131,7 @@ class TeensyInterface:
                 pass
         self._rx_remainder = b""
         self.quat = [1.0, 0.0, 0.0, 0.0] 
-        self.gyrop = np.zeros(3, dtype=float)
+        self.gyro = np.zeros(3, dtype=float)
         self.m1_rad = 0.0
         self.m2_rad = 0.0
         self.acc_mag = 0.0
@@ -442,7 +442,7 @@ def main():
                     action = [0, 0, 0, 0]
 
                     # Controller On : Beging Bend Spine Phase
-                    if back.acc_mag < Drop_acc_threshold:
+                    if back.acc_mag < drop_acc_threshold:
                         controller_started = True
                         controller_start_time = loop_start
                         phase = PHASE_BEND_SPINE
