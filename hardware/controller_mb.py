@@ -56,9 +56,11 @@ USE_DROP_TRIGGER = True
 drop_acc_threshold = 7.0   # m/s^2
 time_max = 10.0            
 
-# Front and Rear Roll Sign Difference
+# Each motor sign differnece (Front and Rear Roll Sign Difference)
 front_roll_sign = -1.0
 rear_roll_sign = +1.0
+tail_sign = +1.0
+
 
 # Phase Number
 PHASE_BEND_SPINE = 0
@@ -73,6 +75,7 @@ roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 # Gains
 Kp_settle_roll = 0.8
 Kp_settle_roll_diff = 0.3
+Kp_tail = 0.8
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -314,6 +317,13 @@ def compute_roll_error(state):
     roll_back, _, _ = quat_wxyz_to_euler_xyz(state["quat_back"])
     return roll_back
 
+# 이거 그냥 나중에 롤이랑 합쳐 버리자
+# Compute pitch error (world frame)
+def compute_pitch_error(state):
+    _, pitch_back, _ = quat_wxyz_to_euler_xyz(state["quat_back"])
+    return pitch_back
+
+
 # Coupled roll / Rear and front body roll differnece.
 def compute_derived_state(state):
     qf = state["q_front_roll"]
@@ -430,6 +440,7 @@ def main():
             
             action = [0, 0, 0, 0]
 
+            pitch_err_log = float("nan")
             roll_err_log = float("nan")
             phi_diff_log = float("nan")
             phi_coupl_log = float("nan")
@@ -463,8 +474,10 @@ def main():
                     state = get_joint_state(front, back)
                     state = compute_derived_state(state)
                     roll_err = compute_roll_error(state)
+                    pitch_err = compute_pitch_error(state)
 
                     # Logging for debug
+                    pitch_err_log = pitch_err
                     roll_err_log = roll_err
                     phi_diff_log = state["phi_diff"]
                     phi_coupl_log = state["phi_coupl"]
@@ -488,7 +501,7 @@ def main():
                         cmd_front_roll = front_roll_sign * u_roll
                         cmd_rear_roll = rear_roll_sign * u_roll
                         cmd_spine = np.deg2rad(spine_target)
-                        cmd_tail = 0.0
+                        cmd_tail = tail_sign * Kp_tail * pitch_err
 
                         if abs(roll_err) < np.deg2rad(roll_threshold): 
                             phase = PHASE_SETTLE  
@@ -521,7 +534,7 @@ def main():
             # Debug print
             if t - last_debug_print >= 0.1:   # print every 0.1 s
                 print(
-                    f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | "
+                    f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
                     f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
                     f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
