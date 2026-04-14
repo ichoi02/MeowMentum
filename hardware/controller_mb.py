@@ -68,15 +68,23 @@ PHASE_RIGHTING = 1
 PHASE_SETTLE = 2
 
 # Phase Config
-spine_target = 87.0   # for PHASE_BEND_SPINE (deg)
-spine_target_threshold = 8.0   # How close to target before switching to next phase (deg)
+spine_target = 85.0   # for PHASE_BEND_SPINE (deg)
+spine_target_threshold = 6.0   # How close to target before switching to next phase (deg)
 roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 
 # Gains
-Kp_spine = 1.0
-Kp_settle_roll = 0.8
+Kp_righting_roll = 1.0
+Kd_righting_roll = 0.08
+
+Kp_settle_roll = 1.0
+Kd_settle_roll = 0.1
+
 Kp_settle_roll_diff = 0.3
-Kp_tail = 0.8
+
+Kp_tail = 1.0
+Kd_tail = 0.05
+
+
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -234,7 +242,8 @@ class TeensyInterface:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
                     self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
-                    self.gyro =  np.array([float(x) for x in parts[4:7]], dtype=float) 
+                    self.gyro_raw =  np.array([float(x) for x in parts[4:7]], dtype=float)      # added gyro raw data
+                    self.gyro = self.align_imu_vector(self.gyro_raw, self.name)                 # added gyro alignment
                     self.m1_rad = float(parts[7])
                     self.m2_rad = float(parts[8])
                     self.acc_mag = float(parts[9])
@@ -255,7 +264,7 @@ class TeensyInterface:
         r_raw = R.from_quat(quats_wxyz, scalar_first=True)
         
         if imu_type == 'Front':
-            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True) # -90은 아니겠지?
+            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True) 
             
         elif imu_type == 'Back':
             r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
@@ -266,7 +275,18 @@ class TeensyInterface:
         return aligned_wxyz.squeeze(0)
     
     # IMU alignment
-    def align_imu_vector()
+    def align_imu_vector(self, vec_xyz, imu_type):
+        v = np.asarray(vec_xyz, dtype=float).reshape(1,3)
+
+        if imu_type == 'Front':
+            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
+        elif imu_type == 'Back':
+            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
+        else:
+            return np.asarray(vec_xyz, dtype=float)
+
+        return r_align.apply(v).squeeze(0)
+    
 
 
 def get_port_by_sn(serial_number):
@@ -326,6 +346,16 @@ def compute_roll_error(state):
 def compute_pitch_error(state):
     _, pitch_back, _ = quat_wxyz_to_euler_xyz(state["quat_back"])
     return pitch_back
+
+# Compute body roll, pitch rate (proxy for now using gyro, but can be derived from quaternions in the future if needed)
+def compute_body_rates_proxy(state):
+    gyro_back = state["gyro_back"]
+
+    roll_rate_back = gyro_back[0]       # x-axis angular rate proxy  -> Not REAL EULER RATE AT THIS MOMENT!
+    pitch_rate_back = gyro_back[1]
+
+    return roll_rate_back, pitch_rate_back
+
 
 
 # Coupled roll / Rear and front body roll differnece.
@@ -454,6 +484,8 @@ def main():
             roll_err_log = float("nan")
             phi_diff_log = float("nan")
             phi_coupl_log = float("nan")
+            roll_rate_log = float("nan")
+            pitch_rate_log = float("nan")
 
             if args.debug:
                 action = list(debug_action) 
@@ -485,12 +517,15 @@ def main():
                     state = compute_derived_state(state)
                     roll_err = compute_roll_error(state)
                     pitch_err = compute_pitch_error(state)
+                    roll_rate, pitch_rate = compute_body_rates_proxy(state)   # Not exact Euler rate! Check the func.
 
                     # Logging for debug
                     pitch_err_log = pitch_err
                     roll_err_log = roll_err
                     phi_diff_log = state["phi_diff"]
                     phi_coupl_log = state["phi_coupl"]
+                    roll_rate_log = roll_rate
+                    pitch_rate_log = pitch_rate
 
                     cmd_front_roll = 0.0
                     cmd_rear_roll = 0.0
@@ -500,25 +535,26 @@ def main():
                     if phase == PHASE_BEND_SPINE:
                         cmd_front_roll = 0.0
                         cmd_rear_roll = 0.0
-                        cmd_spine = Kp_spine*np.deg2rad(spine_target)
+                        cmd_spine = np.deg2rad(spine_target)
                         cmd_tail = 0.0
 
                         if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
                             phase = PHASE_RIGHTING
 
                     elif phase == PHASE_RIGHTING:
-                        u_roll = -1.0 * roll_err 
+                        u_roll = -Kp_righting_roll * roll_err - Kd_righting_roll * roll_rate
                         cmd_front_roll = front_roll_sign * u_roll
                         cmd_rear_roll = rear_roll_sign * u_roll
-                        cmd_spine = Kp_spine*np.deg2rad(spine_target)
-                        cmd_tail = tail_sign * Kp_tail * pitch_err
+                        cmd_spine = np.deg2rad(spine_target)
+                        u_tail = -Kp_tail * pitch_err - Kd_tail * pitch_rate
+                        cmd_tail = tail_sign * u_tail
 
                         if abs(roll_err) < np.deg2rad(roll_threshold): 
                             phase = PHASE_SETTLE  
 
                     # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
                     elif phase == PHASE_SETTLE:
-                        u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
+                        u_roll = -Kp_settle_roll * roll_err -Kd_settle_roll * roll_rate - Kp_settle_roll_diff * state["phi_diff"]
                         cmd_front_roll = front_roll_sign * u_roll
                         cmd_rear_roll = rear_roll_sign * u_roll
                         cmd_spine = 0.0
@@ -549,6 +585,7 @@ def main():
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
                     f"tail={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
                 )
+                # If needed : roll_rate_log, pitch_rate_log
                 last_debug_print = t
 
 

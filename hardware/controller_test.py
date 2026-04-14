@@ -68,7 +68,7 @@ PHASE_RIGHTING = 1
 PHASE_SETTLE = 2
 
 # Phase Config
-spine_target = 87.0   # for PHASE_BEND_SPINE (deg)
+spine_target = 85.0   # for PHASE_BEND_SPINE (deg)
 spine_target_threshold = 8.0   # How close to target before switching to next phase (deg)
 roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 
@@ -495,7 +495,7 @@ def main():
                     if phase == PHASE_BEND_SPINE:
                         cmd_front_roll = 0.0
                         cmd_rear_roll = 0.0
-                        cmd_spine = Kp_spine*np.deg2rad(spine_target)
+                        cmd_spine = np.deg2rad(spine_target)
                         cmd_tail = 0.0
 
                         if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
