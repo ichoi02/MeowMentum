@@ -53,8 +53,8 @@ SERIAL_DRAIN_MAX_LINES = 32
 
 # Drop Trigger
 USE_DROP_TRIGGER = True
-drop_acc_threshold = 7.0   # m/s^2
-time_max = 10.0            
+drop_acc_threshold = 1.0   # m/s^2
+time_max = 0.7            
 
 # Each motor sign differnece (Front and Rear Roll Sign Difference)
 front_roll_sign = -1.0
@@ -73,7 +73,7 @@ spine_target_threshold = 8.0   # How close to target before switching to next ph
 roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 
 # Gains
-Kp_spine = 0.5
+Kp_spine = 1.0
 Kp_settle_roll = 0.8
 Kp_settle_roll_diff = 0.3
 Kp_tail = 0.8
@@ -138,7 +138,7 @@ class TeensyInterface:
         self.gyro = np.zeros(3, dtype=float)
         self.m1_rad = 0.0
         self.m2_rad = 0.0
-        self.acc_mag = 0.0
+        self.acc_mag = 9.8
 
     def reset_encoders(self):
         """Sends the command to zero out the hardware encoder counts."""
@@ -264,6 +264,9 @@ class TeensyInterface:
         
         aligned_wxyz = r_global.as_quat(scalar_first=True)
         return aligned_wxyz.squeeze(0)
+    
+    # IMU alignment
+    def align_imu_vector()
 
 
 def get_port_by_sn(serial_number):
@@ -362,8 +365,12 @@ def main():
 
     print("Rebooting Teensy")
     front.reboot_teensy()
+    front.ser.close()
+    time.sleep(2)
     back.reboot_teensy()
-    time.sleep(1)
+    back.ser.close()
+    time.sleep(2)
+
 
     path_front = get_port_by_sn(SN_FRONT)
     path_back = get_port_by_sn(SN_BACK)
@@ -396,11 +403,13 @@ def main():
     front.flush_input_safe()
     back.flush_input_safe()
 
+    front.start_all_motors()
+    back.start_all_motors()
+
     print("Press any key to start.")
     input()
 
-    front.start_all_motors()
-    back.start_all_motors()
+
 
     # if not args.debug:
     #     print("Loading ONNX Model...")
@@ -538,7 +547,7 @@ def main():
                     f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
                     f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
-                    f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
+                    f"tail={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
                 )
                 last_debug_print = t
 

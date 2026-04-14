@@ -73,7 +73,7 @@ spine_target_threshold = 8.0   # How close to target before switching to next ph
 roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 
 # Gains
-Kp_spine = 0.5
+Kp_spine = 1.0
 Kp_settle_roll = 0.8
 Kp_settle_roll_diff = 0.3
 Kp_tail = 0.8
