@@ -200,29 +200,32 @@ void loop() {
   int imu_budget = 5; 
   while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
-      case SH2_GAME_ROTATION_VECTOR:
+      case SH2_GAME_ROTATION_VECTOR: {
         imu_qr = sensorValue.un.gameRotationVector.real;
         imu_qi = sensorValue.un.gameRotationVector.i;
         imu_qj = sensorValue.un.gameRotationVector.j;
         imu_qk = sensorValue.un.gameRotationVector.k;
         lastGameRotEventMs = millis(); 
         break;
+      }
         
-      case SH2_ACCELEROMETER:
+      case SH2_ACCELEROMETER: {
         float ax = sensorValue.un.accelerometer.x;
         float ay = sensorValue.un.accelerometer.y;
         float az = sensorValue.un.accelerometer.z;
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
         lastGameRotEventMs = millis(); 
         break;
+      }
 
        
-      case SH2_GYROSCOPE_CALIBRATED:
+      case SH2_GYROSCOPE_CALIBRATED: {
         gyro_x = sensorValue.un.gyroscope.x;
         gyro_y = sensorValue.un.gyroscope.y;
         gyro_z = sensorValue.un.gyroscope.z;
         lastGameRotEventMs = millis();
         break; 
+      }
     }
   }
 
