@@ -39,8 +39,10 @@ bool ENCODER2_REVERSED = true;
 // 3. CONTROL SETTINGS
 // ==========================================
 // PD gains
-double Kp = 1000.0;
-double Kd = 10.0;
+double Kp1 = 1024.0;
+double Kd1 = 10.24;
+double Kp2 = 1024.0;
+double Kd2 = 10.24;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;
@@ -50,7 +52,7 @@ const int PWM_MAX = 1023;
 // Fixed control frequency
 const float CONTROL_HZ = 1000.0f;               // 1 kHz
 const uint32_t CONTROL_PERIOD_US = 1000000UL / CONTROL_HZ;
-const uint32_t PRINT_PERIOD_MS = 50;
+const uint32_t PRINT_PERIOD_MS = 20;
 static char s_telemBuf[128];
 
 // ==========================================
@@ -79,47 +81,51 @@ static const uint32_t IMU_RECOVER_COOLDOWN_MS = 2500;
 
 void clearI2CBus() {
   Wire.end();
-  
+
   // Take manual control of the Teensy 4.0 default I2C pins
   pinMode(18, INPUT_PULLUP); // SDA
   pinMode(19, OUTPUT);       // SCL
   digitalWrite(19, HIGH);
   delay(1);
-  
+
   // Pulse SCL until the sensor releases the SDA line (max 20 pulses)
   for (int i = 0; i < 20; i++) {
     if (digitalRead(18) == HIGH) {
-      break; 
+      break;
     }
     digitalWrite(19, LOW);
     delayMicroseconds(10);
     digitalWrite(19, HIGH);
     delayMicroseconds(10);
   }
-  
+
   // Release SCL to float HIGH
-  pinMode(19, INPUT_PULLUP); 
+  pinMode(19, INPUT_PULLUP);
   delay(10);
-  
+
   Wire.begin();
-  
+
   // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(1000); 
-  Wire.setClock(50000); 
+  Wire.setTimeout(10);
+  Wire.setClock(50000);
 }
 
 static bool bno08x_begin_and_enable() {
   bool ok = false;
-  
+
   for (int attempt = 0; attempt < 5 && !ok; attempt++) {
     if (bno08x.begin_I2C(0x4A, &Wire)) ok = true;
     else delay(50);
   }
-  
+
   if (!ok) {
     return false;
   }
-  
+
+  // IMPORTANT:
+  // Keep IMU output raw on the Teensy side.
+  // Fixed sensor-to-body alignment is handled on the Pi/host side.
+
   bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);
   return true;
@@ -128,10 +134,10 @@ static bool bno08x_begin_and_enable() {
 static void recover_bno08x_from_stall() {
   clearI2CBus();
   delay(50);
-  
+
   if (bno08x_begin_and_enable()) {
     lastGameRotEventMs = millis();
-  } 
+  }
 }
 
 // ==========================================
@@ -168,8 +174,9 @@ void setup() {
 
   // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
+  Wire.setTimeout(10);
   Wire.setClock(50000); // 50kHz for long wire stability
-  
+
   if (!bno08x_begin_and_enable()) {
     while (1) { delay(100); } // Hang if totally dead on boot
   }
@@ -183,34 +190,36 @@ void setup() {
 void loop() {
   handleSerialInput();
 
-  // 1. Check for silent internal sensor resets
+  // Check for silent internal sensor resets
   if (bno08x.wasReset()) {
     bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
     bno08x.enableReport(SH2_ACCELEROMETER, 10000);
     lastGameRotEventMs = millis();
   }
 
-  // 2. Use 'while' to completely drain the FIFO queue of all pending events
-  while (bno08x.getSensorEvent(&sensorValue)) {
+  int imu_budget = 5;
+  while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
     switch (sensorValue.sensorId) {
       case SH2_GAME_ROTATION_VECTOR:
         imu_qr = sensorValue.un.gameRotationVector.real;
         imu_qi = sensorValue.un.gameRotationVector.i;
         imu_qj = sensorValue.un.gameRotationVector.j;
         imu_qk = sensorValue.un.gameRotationVector.k;
-        lastGameRotEventMs = millis(); // Reset watchdog
+        lastGameRotEventMs = millis();
         break;
-        
-      case SH2_ACCELEROMETER:
+
+      case SH2_ACCELEROMETER: {
         float ax = sensorValue.un.accelerometer.x;
         float ay = sensorValue.un.accelerometer.y;
         float az = sensorValue.un.accelerometer.z;
         acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
+        lastGameRotEventMs = millis();
         break;
+      }
     }
   }
 
-  // 4. Run Controller
+  // Run Controller
   uint32_t nowMicros = micros();
   if ((uint32_t)(nowMicros - lastControlMicros) >= CONTROL_PERIOD_US) {
     double dt = (nowMicros - lastControlMicros) / 1000000.0;
@@ -218,11 +227,11 @@ void loop() {
     runController(dt);
   }
 
-  // 5. Print Telemetry
+  // Print Telemetry
   uint32_t nowMillis = millis();
   if ((uint32_t)(nowMillis - lastPrintMillis) >= PRINT_PERIOD_MS) {
     lastPrintMillis = nowMillis;
-    
+
     float angle1 = readEncoder1();
     float angle2 = readEncoder2();
 
@@ -253,7 +262,7 @@ void runController(double dt) {
     stopMotor1();
   } else {
     double deriv1 = (err1 - lastErr1) / dt;
-    double cmd1 = (Kp * err1) + (Kd * deriv1);
+    double cmd1 = (Kp1 * err1) + (Kd1 * deriv1);
     if (MOTOR1_REVERSED) cmd1 = -cmd1;
     driveMotor1(cmd1);
   }
@@ -264,7 +273,7 @@ void runController(double dt) {
     stopMotor2();
   } else {
     double deriv2 = (err2 - lastErr2) / dt;
-    double cmd2 = (Kp * err2) + (Kd * deriv2);
+    double cmd2 = (Kp2 * err2) + (Kd2 * deriv2);
     if (MOTOR2_REVERSED) cmd2 = -cmd2;
     driveMotor2(cmd2);
   }
@@ -301,7 +310,10 @@ static void processSerialLine(char *line) {
     delay(100);
     SCB_AIRCR = 0x05FA0004;
   } else if (strcmp(line, "RESET_IMU") == 0) {
-    sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
+    // Optional manual tare for debugging only.
+    // Do not use during normal host-side aligned policy runs.
+    sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z,
+                   SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
   } else if (strcmp(line, "RESET_I2C") == 0) {
     recover_bno08x_from_stall();
   } else {
@@ -341,13 +353,13 @@ void handleSerialInput() {
 float readEncoder1() {
   long pos = enc1.read();
   if (ENCODER1_REVERSED) pos = -pos;
-  return (float)pos/TICKS_PER_REV/M1GEAR*2*PI;
+  return (float)pos / TICKS_PER_REV / M1GEAR * 2 * PI;
 }
 
 float readEncoder2() {
   long pos = enc2.read();
   if (ENCODER2_REVERSED) pos = -pos;
-  return (float)pos/TICKS_PER_REV/M2GEAR*2*PI;
+  return (float)pos / TICKS_PER_REV / M2GEAR * 2 * PI;
 }
 
 // ==========================================
