@@ -335,8 +335,8 @@ def main():
         # Fetch the exact input name defined during your PyTorch export
         input_name = ort_session.get_inputs()[0].name 
 
-    front.start_all_motors()
-    back.start_all_motors()
+    # front.start_all_motors()
+    # back.start_all_motors()
     print("Press enter to start.")
     input()
 

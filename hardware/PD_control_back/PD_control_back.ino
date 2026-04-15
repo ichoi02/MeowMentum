@@ -192,8 +192,7 @@ void loop() {
 
   // 1. Check for silent internal sensor resets
   if (bno08x.wasReset()) {
-    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
-    bno08x.enableReport(SH2_ACCELEROMETER, 10000);
+    bno08x_begin_and_enable();
     lastGameRotEventMs = millis();
   }
 
