@@ -70,7 +70,7 @@ PHASE_SETTLE = 2
 # Phase Config
 spine_target = 85.0   # for PHASE_BEND_SPINE (deg)
 spine_target_threshold = 8.0   # How close to target before switching to next phase (deg)
-roll_threshold = 5.0   # Below this err move to settle phase. (deg)
+roll_threshold = 10.0   # Below this err move to settle phase. (deg)
 
 # Gains
 Kp_spine = 1.0

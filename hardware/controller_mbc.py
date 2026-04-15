@@ -1,4 +1,5 @@
 import os
+from dateutil import parser
 from scipy.spatial.transform import Rotation as R
 
 # Edge / Pi: ONNX probes GPU on load; keep stderr quiet (4 = fatal in typical ORT builds).
@@ -69,22 +70,14 @@ PHASE_SETTLE = 2
 
 # Phase Config
 spine_target = 85.0   # for PHASE_BEND_SPINE (deg)
-spine_target_threshold = 6.0   # How close to target before switching to next phase (deg)
+spine_target_threshold = 8.0   # How close to target before switching to next phase (deg)
 roll_threshold = 5.0   # Below this err move to settle phase. (deg)
 
 # Gains
-Kp_righting_roll = 1.0
-Kd_righting_roll = 0.08
-
-Kp_settle_roll = 1.0
-Kd_settle_roll = 0.1
-
+Kp_spine = 1.0
+Kp_settle_roll = 0.8
 Kp_settle_roll_diff = 0.3
-
-Kp_tail = 1.0
-Kd_tail = 0.05
-
-
+Kp_tail = 0.8
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -242,8 +235,8 @@ class TeensyInterface:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
                     self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
-                    self.gyro_raw =  np.array([float(x) for x in parts[4:7]], dtype=float)      # added gyro raw data
-                    self.gyro = self.align_imu_vector(self.gyro_raw, self.name)                 # added gyro alignment
+                    self.gyro =  np.array([float(x) for x in parts[4:7]], dtype=float) 
+                    self.gyro = self.align_imu_gyro(self.gyro, self.name).tolist()
                     self.m1_rad = float(parts[7])
                     self.m2_rad = float(parts[8])
                     self.acc_mag = float(parts[9])
@@ -264,7 +257,7 @@ class TeensyInterface:
         r_raw = R.from_quat(quats_wxyz, scalar_first=True)
         
         if imu_type == 'Front':
-            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True) 
+            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True) # -90은 아니겠지?
             
         elif imu_type == 'Back':
             r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
@@ -273,21 +266,15 @@ class TeensyInterface:
         
         aligned_wxyz = r_global.as_quat(scalar_first=True)
         return aligned_wxyz.squeeze(0)
-    
-    # IMU alignment
-    def align_imu_vector(self, vec_xyz, imu_type):
-        v = np.asarray(vec_xyz, dtype=float).reshape(1,3)
 
+    # algin gyro
+    def align_imu_gyro(self, gyro_sensor, imu_type):
         if imu_type == 'Front':
             r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
         elif imu_type == 'Back':
             r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
-        else:
-            return np.asarray(vec_xyz, dtype=float)
-
-        return r_align.apply(v).squeeze(0)
-    
-
+        # sensor frame → body frame
+        return r_align.inv().apply(np.asarray(gyro_sensor, dtype=float))    
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
@@ -347,16 +334,6 @@ def compute_pitch_error(state):
     _, pitch_back, _ = quat_wxyz_to_euler_xyz(state["quat_back"])
     return pitch_back
 
-# Compute body roll, pitch rate (proxy for now using gyro, but can be derived from quaternions in the future if needed)
-def compute_body_rates_proxy(state):
-    gyro_back = state["gyro_back"]
-
-    roll_rate_back = gyro_back[0]       # x-axis angular rate proxy  -> Not REAL EULER RATE AT THIS MOMENT!
-    pitch_rate_back = gyro_back[1]
-
-    return roll_rate_back, pitch_rate_back
-
-
 
 # Coupled roll / Rear and front body roll differnece.
 def compute_derived_state(state):
@@ -368,42 +345,119 @@ def compute_derived_state(state):
 
     return {**state, "phi_coupl": phi_coupl, "phi_diff": phi_diff}
 
-# Assuming gravity vector in world frame is [0, 0, -1]
-# Get the down axis (z-axis) of the back IMU in world frame
-# Compute z_alignment error
-# 원래 이거 rear 로만 했었는데, 이상하면 다시 rear로만 하게 바꿀게유 
-def compute_down_axis_alignment_error(state):
-    r_back = R.from_quat(state["quat_back"], scalar_first=True)
-    r_front = R.from_quat(state["quat_front"], scalar_first=True)
-
-    local_down = np.array([0.0, 0.0, -1.0], dtype=float)
-    world_down = np.array([0.0, 0.0, -1.0], dtype=float)
-
-    back_down_world = r_back.apply(local_down)
-    front_down_world = r_front.apply(local_down)
-
-    down_avg = 0.5* (back_down_world + front_down_world)
-
-    norm = np.linalg.norm(down_avg)
-    if norm < 1e-8:
-        down_avg = back_down_world
-        norm = np.linalg.norm(down_avg)
-    down_avg = down_avg/ norm
-
-    # magnitude-only alignment error
-    cos_angle = np.clip(np.dot(down_avg, world_down), -1.0, 1.0)
-    align_angle = np.arccos(cos_angle)
-
-    # signed small-angle error proxy in world frame
-    err_vec = np.cross(down_avg, world_down)
-    roll_err_z = err_vec[0]
-    pitch_err_z = err_vec[1]
-
-    return roll_err_z, pitch_err_z, align_angle
-
-
 
 ########
+
+
+###################################
+# Reduced Model-based Controller
+###################################
+JI_FR = 0
+JI_SP = 1
+JI_TA = 2
+JI_RR = 3
+
+# BNO08x / MuJoCo quaternions [w, x, y, z] to SciPy [x, y, z, w]
+def mj_quat_to_scipy(q_wxyz):
+    return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
+
+def orientation_error_zaxis(R_WR):
+    z_body = R_WR[:, 2]
+    z_tgt = np.array([0.0, 0.0, 1.0])
+    cross = np.cross(z_body, z_tgt)
+    sin_a = float(np.linalg.norm(cross))
+    cos_a = float(np.dot(z_body, z_tgt))
+    angle = float(np.arctan2(sin_a, cos_a))
+
+    if sin_a < 1e-7:
+        if cos_a > 0.0:
+            return np.zeros(3)
+        else:
+            return np.array([0.0, 0.0, np.pi])
+            # return np.array([1.0, 0.0, 0.0]) * np.pi >> 이렇게 하면 스페셜 케이스 핸들이 되나?
+    axis = cross/ sin_a 
+    return axis * angle, angle
+
+class MBController:
+    def __init__(self,
+                # Phase 1 (Righting) Gains
+                Kp_right = 6.0, Kd_right = 0.6,
+                Kp_pitch = 0.8, Kd_pitch = 0.10,
+                # Phase 2 (Settle) Gains
+                Kp_settle_roll = 1.0, Kd_settle_roll = 0.15,
+                Kp_settle_pitch = 0.8, Kd_settle_pitch = 0.10,
+                Kp_settle_diff = 0.3,
+                # Kane-Scher Feedforward Gains
+                k_KS = 1.0,         # overall gain (absorbs inertia ratio alpha)
+                sin_s_min = 0.25    # floor on |sin(q_spine)|
+                # Spine target parameters
+                spine_target_deg = 85.0,          # for PHASE_BEND_SPINE
+                spine_done_threshold_deg = 8.0,
+                settle_threshold_deg = 10.0,             # Below this err move to settle phase. (deg)
+                # Joint limits
+                max_roll = 6.28, max_tail = 1.55, max_spine = 1.55
+                # Hardware sign config
+                front_roll_sign = -1.0, rear_roll_sign = +1.0, tail_sign = +1.0,
+                # Joint velocity estimator
+                qdot_lpf_alpha = 0.25):
+        # Gains
+        self.Kp_r = Kp_right
+        self.Kd_r = Kd_right
+        self.Kp_p = Kp_pitch
+        self.Kd_p = Kd_pitch
+        self.Kp_sr = Kp_settle_roll
+        self.Kd_sr = Kd_settle_roll
+        self.Kp_sp = Kp_settle_pitch
+        self.Kd_sp = Kd_settle_pitch
+        self.Kp_sd = Kp_settle_diff
+        # Geometry / feedforward
+        self.k_KS      = k_KS
+        self.sin_s_min = sin_s_min
+        self.spine_mag    = np.radians(spine_target_deg)
+        self.spine_thresh = np.radians(spine_done_threshold_deg)
+        self.settle_thr   = np.radians(settle_thresh_deg)
+        # clips & signs
+        self.clip_roll  = max_roll
+        self.clip_tail  = max_tail
+        self.clip_spine = max_spine
+        self.fr_sign = front_roll_sign
+        self.rr_sign = rear_roll_sign
+        self.ta_sign = tail_sign
+        # filter
+        self._lpf_a = qdot_lpf_alpha
+
+        # Runtime State
+        self.phase = PHASE_BEND_SPINE
+        self.theta_spine_target = None
+        self._q_perv = None
+        self._qdot_filt = np.zeros(4)
+
+    def reset(self):
+        self.phase = PHASE_BEND_SPINE
+        self.theta_spine_target = None
+        self._q_perv = None
+        self._qdot_filt = np.zeros(4)
+
+    def compute(self, front, back, dt):
+        # Joint Positions (rad) # Order: front roll, spine, tail, rear roll
+        q_j = np.array([front.m1_rad, front.m2_rad, back.m1_rad, back.m2_rad])
+
+        if self._q_prev is None:
+            self._q_prev = q_j.copy()
+        
+        qdot_raw = (q_j - self._q_prev) / max(dt, 1e-4)
+        # Low-pass filter the raw veloccity estimate to reduce noise. 
+        self.__qdot_filt = (1.0 - self._lpf_a) * self._qdot_filt + self._lpf_a * qdot_raw
+        self._q_prev = q_j.copy()
+
+        q_fr, q_sp, q_ta, q_rr = q_j
+
+
+        
+
+
+    
+
 
 
 def main():
@@ -434,7 +488,6 @@ def main():
     back.reboot_teensy()
     back.ser.close()
     time.sleep(2)
-
 
     path_front = get_port_by_sn(SN_FRONT)
     path_back = get_port_by_sn(SN_BACK)
@@ -467,13 +520,12 @@ def main():
     front.flush_input_safe()
     back.flush_input_safe()
 
+
+
     front.start_all_motors()
     back.start_all_motors()
-
     print("Press any key to start.")
     input()
-
-
 
     # if not args.debug:
     #     print("Loading ONNX Model...")
@@ -518,8 +570,6 @@ def main():
             roll_err_log = float("nan")
             phi_diff_log = float("nan")
             phi_coupl_log = float("nan")
-            roll_rate_log = float("nan")
-            pitch_rate_log = float("nan")
 
             if args.debug:
                 action = list(debug_action) 
@@ -551,15 +601,12 @@ def main():
                     state = compute_derived_state(state)
                     roll_err = compute_roll_error(state)
                     pitch_err = compute_pitch_error(state)
-                    roll_rate, pitch_rate = compute_body_rates_proxy(state)   # Not exact Euler rate! Check the func.
 
                     # Logging for debug
                     pitch_err_log = pitch_err
                     roll_err_log = roll_err
                     phi_diff_log = state["phi_diff"]
                     phi_coupl_log = state["phi_coupl"]
-                    roll_rate_log = roll_rate
-                    pitch_rate_log = pitch_rate
 
                     cmd_front_roll = 0.0
                     cmd_rear_roll = 0.0
@@ -576,19 +623,18 @@ def main():
                             phase = PHASE_RIGHTING
 
                     elif phase == PHASE_RIGHTING:
-                        u_roll = -Kp_righting_roll * roll_err - Kd_righting_roll * roll_rate
+                        u_roll = -1.0 * roll_err 
                         cmd_front_roll = front_roll_sign * u_roll
                         cmd_rear_roll = rear_roll_sign * u_roll
-                        cmd_spine = np.deg2rad(spine_target)
-                        u_tail = -Kp_tail * pitch_err - Kd_tail * pitch_rate
-                        cmd_tail = tail_sign * u_tail
+                        cmd_spine = Kp_spine*np.deg2rad(spine_target)
+                        cmd_tail = tail_sign * Kp_tail * pitch_err
 
                         if abs(roll_err) < np.deg2rad(roll_threshold): 
                             phase = PHASE_SETTLE  
 
                     # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
                     elif phase == PHASE_SETTLE:
-                        u_roll = -Kp_settle_roll * roll_err -Kd_settle_roll * roll_rate - Kp_settle_roll_diff * state["phi_diff"]
+                        u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
                         cmd_front_roll = front_roll_sign * u_roll
                         cmd_rear_roll = rear_roll_sign * u_roll
                         cmd_spine = 0.0
@@ -617,9 +663,8 @@ def main():
                     f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
                     f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
-                    f"tail={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
+                    f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
                 )
-                # If needed : roll_rate_log, pitch_rate_log
                 last_debug_print = t
 
 
@@ -669,311 +714,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Reduced Model-Based Controller (Level 2: axis-angle + Kane-Scher FF)
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# Action/state vector convention used inside this controller:
-#   idx 0 : front_roll   (Front Teensy M1)
-#   idx 1 : spine_pitch  (Front Teensy M2)
-#   idx 2 : tail_pitch   (Back  Teensy M1)
-#   idx 3 : rear_roll    (Back  Teensy M2)
-#
-# This matches the order that main() already uses:
-#     action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]
-
-JI_FR = 0   # front_roll
-JI_SP = 1   # spine
-JI_TA = 2   # tail
-JI_RR = 3   # rear_roll
-
-
-def mj_quat_to_scipy(q_wxyz):
-    """BNO08x / MuJoCo quaternion [w,x,y,z] -> scipy [x,y,z,w]."""
-    return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
-
-
-def orientation_error_zaxis(R_WR):
-    """
-    Axis-angle vector that rotates rear_body +z onto world +z.
-
-    Returns
-    -------
-    err_vec   : (3,) = axis * angle  in world frame
-    err_angle : float in [0, pi]
-    """
-    z_body = R_WR[:, 2]
-    z_tgt  = np.array([0.0, 0.0, 1.0])
-    cross  = np.cross(z_body, z_tgt)
-    sin_a  = float(np.linalg.norm(cross))
-    cos_a  = float(np.dot(z_body, z_tgt))
-    angle  = float(np.arctan2(sin_a, cos_a))
-
-    if sin_a < 1e-7:
-        if cos_a > 0.0:
-            return np.zeros(3), 0.0
-        else:                                    # exactly upside-down
-            return np.array([1.0, 0.0, 0.0]) * np.pi, np.pi
-
-    axis = cross / sin_a
-    return axis * angle, angle
-
-
-class ReducedModelController:
-    """
-    Level-2 reduced model-based controller for cat righting.
-
-    Design choices
-    --------------
-    1) Error model is the same axis-angle z-alignment used in the MuJoCo
-       CTC (orientation_error_zaxis). This is singularity-free and works
-       at 180-degree flips.
-
-    2) The 3D error is decomposed into rear-body local frame:
-          roll_err  = err_vec . x_body     (handled by coupled roll)
-          pitch_err = err_vec . y_body     (handled by tail)
-
-    3) Coupled-roll command uses Kane-Scher geometry:
-          omega_base_x_component ~= k_KS * sin(q_spine) * qdot_coupled
-       so the required coupled-roll velocity to produce a desired body
-       angular rate is:
-          qdot_coupled_des = omega_des / ( k_KS * sin(q_spine) )
-       with a small floor on |sin| to avoid division near zero.
-
-    4) Output is joint *position* targets (rad) so the existing Teensy
-       firmware (position PD) is unchanged. Desired velocities are
-       forward-integrated once per control tick:
-          q_des = q_curr + qdot_cmd * dt
-
-    Phase transitions follow the same structure as the MuJoCo simulator:
-        BEND_SPINE -> RIGHTING -> SETTLE
-    """
-
-    def __init__(self,
-                 # ---- Phase 1 (RIGHTING) gains ----
-                 Kp_right=6.0,  Kd_right=0.6,       # desired body-x angular rate
-                 Kp_pitch=0.8,  Kd_pitch=0.10,      # tail pitch loop
-                 # ---- Phase 2 (SETTLE) gains ----
-                 Kp_settle_roll=1.0,  Kd_settle_roll=0.15,
-                 Kp_settle_pitch=0.8, Kd_settle_pitch=0.10,
-                 Kp_settle_diff=0.3,                # closes phi_diff (two-body disagreement)
-                 # ---- Kane-Scher feedforward ----
-                 k_KS=1.0,         # overall gain (absorbs inertia ratio alpha)
-                 sin_s_min=0.25,   # floor on |sin(q_spine)|
-                 # ---- Spine targeting ----
-                 spine_target_deg=87.0,
-                 spine_done_thresh_deg=8.0,
-                 settle_thresh_deg=5.0,
-                 # ---- Joint limits (rad) ----
-                 clip_roll=6.28, clip_tail=1.50, clip_spine=1.50,
-                 # ---- Hardware sign convention ----
-                 front_roll_sign=-1.0, rear_roll_sign=+1.0, tail_sign=+1.0,
-                 # ---- Joint velocity estimator ----
-                 qdot_lpf_alpha=0.25):
-        # gains
-        self.Kp_r  = Kp_right;       self.Kd_r  = Kd_right
-        self.Kp_p  = Kp_pitch;       self.Kd_p  = Kd_pitch
-        self.Kp_sr = Kp_settle_roll; self.Kd_sr = Kd_settle_roll
-        self.Kp_sp = Kp_settle_pitch; self.Kd_sp = Kd_settle_pitch
-        self.Kp_diff = Kp_settle_diff
-        # geometry / feedforward
-        self.k_KS      = k_KS
-        self.sin_s_min = sin_s_min
-        self.spine_mag    = np.radians(spine_target_deg)
-        self.spine_thresh = np.radians(spine_done_thresh_deg)
-        self.settle_thr   = np.radians(settle_thresh_deg)
-        # clips & signs
-        self.clip_roll  = clip_roll
-        self.clip_tail  = clip_tail
-        self.clip_spine = clip_spine
-        self.fr_sign = front_roll_sign
-        self.rr_sign = rear_roll_sign
-        self.ta_sign = tail_sign
-        # filter
-        self._lpf_a = qdot_lpf_alpha
-
-        # --- runtime state ---
-        self.phase              = PHASE_BEND_SPINE
-        self.theta_spine_target = None
-        self._q_prev     = None
-        self._qdot_filt  = np.zeros(4)
-
-    # ------------------------------------------------------------------
-    def reset(self):
-        """Called at drop-trigger to zero internal state."""
-        self.phase              = PHASE_BEND_SPINE
-        self.theta_spine_target = None
-        self._q_prev            = None
-        self._qdot_filt         = np.zeros(4)
-
-    # ------------------------------------------------------------------
-    def compute(self, front, back, dt):
-        """
-        Parameters
-        ----------
-        front, back : TeensyInterface (must have fresh quat / gyro / m1_rad / m2_rad)
-        dt          : control period (s), typically 1/LOOP_HZ
-
-        Returns
-        -------
-        q_des : np.array shape (4,) in [front_roll, spine, tail, rear_roll] order
-        phase : int
-        dbg   : dict of diagnostics for logging
-        """
-        # ---- 1. Joint positions (rad) in controller order ---------------------
-        q_j = np.array([float(front.m1_rad),   # front_roll
-                        float(front.m2_rad),   # spine
-                        float(back.m1_rad),    # tail
-                        float(back.m2_rad)])   # rear_roll
-
-        # First tick: seed previous so qdot ~ 0
-        if self._q_prev is None:
-            self._q_prev = q_j.copy()
-
-        qdot_raw        = (q_j - self._q_prev) / max(dt, 1e-4)
-        self._qdot_filt = (1.0 - self._lpf_a) * self._qdot_filt + self._lpf_a * qdot_raw
-        self._q_prev    = q_j.copy()
-        # (qdot_filt available for future use; not currently needed by law)
-
-        q_fr, q_sp, q_ta, q_rr = q_j
-
-        # ---- 2. Rear-body rotation and world-frame angular velocity -----------
-        q_wxyz = np.asarray(back.quat, dtype=float)
-        if np.linalg.norm(q_wxyz) < 1e-6:
-            q_wxyz = np.array([1.0, 0.0, 0.0, 0.0])
-        R_WR       = Rotation.from_quat(mj_quat_to_scipy(q_wxyz)).as_matrix()
-        gyro_body  = np.asarray(back.gyro, dtype=float)
-        omega_W    = R_WR @ gyro_body                       # gyro is body -> world
-
-        x_body = R_WR[:, 0]
-        y_body = R_WR[:, 1]
-
-        # ---- 3. Axis-angle error and body-frame decomposition -----------------
-        err_vec, err_angle = orientation_error_zaxis(R_WR)
-        roll_err    = float(err_vec @ x_body)
-        pitch_err   = float(err_vec @ y_body)
-        omega_roll  = float(omega_W @ x_body)
-        omega_pitch = float(omega_W @ y_body)
-
-        # ---- 4. Spine target sign (latched on first call) ---------------------
-        if self.theta_spine_target is None:
-            proj = float(err_vec @ y_body)
-            sign = np.sign(proj) if abs(proj) > 0.2 else 1.0
-            self.theta_spine_target = sign * self.spine_mag
-
-        # ---- 5. Derived phi_diff (front/rear roll disagreement) ---------------
-        phi_diff = self.fr_sign * q_fr - self.rr_sign * q_rr
-
-        # ---- 6. Phase transitions ---------------------------------------------
-        prev_phase = self.phase
-        if self.phase == PHASE_BEND_SPINE:
-            if abs(q_sp - self.theta_spine_target) < self.spine_thresh:
-                self.phase = PHASE_RIGHTING
-        elif self.phase == PHASE_RIGHTING:
-            if abs(err_angle) < self.settle_thr:
-                self.phase = PHASE_SETTLE
-
-        if self.phase != prev_phase:
-            print(f"[phase] {prev_phase} -> {self.phase} | "
-                  f"err={np.degrees(err_angle):+6.1f} deg | "
-                  f"spine={np.degrees(q_sp):+6.1f} deg")
-
-        # ---- 7. Phase-specific law --------------------------------------------
-        if self.phase == PHASE_BEND_SPINE:
-            q_des = self._law_bend(q_fr, q_ta, q_rr)
-        elif self.phase == PHASE_RIGHTING:
-            q_des = self._law_righting(q_fr, q_sp, q_ta, q_rr,
-                                       roll_err, pitch_err,
-                                       omega_roll, omega_pitch,
-                                       dt)
-        else:
-            q_des = self._law_settle(q_fr, q_sp, q_ta, q_rr,
-                                     roll_err, pitch_err,
-                                     omega_roll, omega_pitch,
-                                     phi_diff, dt)
-
-        # ---- 8. Joint soft-limits ---------------------------------------------
-        q_des[JI_FR] = np.clip(q_des[JI_FR], -self.clip_roll,  self.clip_roll)
-        q_des[JI_RR] = np.clip(q_des[JI_RR], -self.clip_roll,  self.clip_roll)
-        q_des[JI_SP] = np.clip(q_des[JI_SP], -self.clip_spine, self.clip_spine)
-        q_des[JI_TA] = np.clip(q_des[JI_TA], -self.clip_tail,  self.clip_tail)
-
-        dbg = {
-            "phase":       self.phase,
-            "err_angle":   err_angle,
-            "roll_err":    roll_err,
-            "pitch_err":   pitch_err,
-            "omega_roll":  omega_roll,
-            "omega_pitch": omega_pitch,
-            "phi_diff":    phi_diff,
-            "q_spine":     q_sp,
-            "theta_spine_target": self.theta_spine_target,
-        }
-        return q_des, self.phase, dbg
-
-    # ======================================================================
-    # Phase laws
-    # ======================================================================
-    def _law_bend(self, q_fr, q_ta, q_rr):
-        """Phase 0: drive spine to theta_spine_target, hold other joints at 0."""
-        q_des = np.zeros(4)
-        q_des[JI_FR] = 0.0
-        q_des[JI_SP] = self.theta_spine_target
-        q_des[JI_TA] = 0.0
-        q_des[JI_RR] = 0.0
-        return q_des
-
-    def _law_righting(self, q_fr, q_sp, q_ta, q_rr,
-                      roll_err, pitch_err,
-                      omega_roll, omega_pitch,
-                      dt):
-        """Phase 1: Kane-Scher coupled roll + tail pitch correction."""
-        # Desired body-x angular rate
-        omega_des_x = self.Kp_r * roll_err - self.Kd_r * omega_roll
-
-        # Kane-Scher inversion: map body rate -> coupled-roll joint rate
-        sin_raw = np.sin(q_sp)
-        if abs(sin_raw) < self.sin_s_min:
-            sin_s = self.sin_s_min if sin_raw >= 0 else -self.sin_s_min
-        else:
-            sin_s = sin_raw
-
-        qdot_cpl_des = self.k_KS * omega_des_x / sin_s
-        dq_cpl       = qdot_cpl_des * dt
-
-        # Tail does pitch
-        u_tail = self.Kp_p * pitch_err - self.Kd_p * omega_pitch
-
-        q_des = np.zeros(4)
-        q_des[JI_FR] = q_fr + self.fr_sign * dq_cpl
-        q_des[JI_RR] = q_rr + self.rr_sign * dq_cpl
-        q_des[JI_SP] = self.theta_spine_target
-        q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
-        return q_des
-
-    def _law_settle(self, q_fr, q_sp, q_ta, q_rr,
-                    roll_err, pitch_err,
-                    omega_roll, omega_pitch,
-                    phi_diff, dt):
-        """Phase 2: spine returns to 0, roll residual + phi_diff, tail for pitch."""
-        # Roll residual + two-body disagreement
-        u_roll = (self.Kp_sr  * roll_err
-                  - self.Kd_sr * omega_roll
-                  - self.Kp_diff * phi_diff)
-        u_tail = self.Kp_sp * pitch_err - self.Kd_sp * omega_pitch
-
-        q_des = np.zeros(4)
-        q_des[JI_FR] = q_fr + self.fr_sign * u_roll * dt
-        q_des[JI_RR] = q_rr + self.rr_sign * u_roll * dt
-        q_des[JI_SP] = 0.0
-        q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
-        return q_des
