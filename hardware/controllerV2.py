@@ -44,6 +44,7 @@ import numpy as np
 import csv
 import threading
 import cat_env.env_util as util
+import socket
 
 # --- CONFIGURATION ---
 SN_FRONT = "18451300" 
@@ -55,6 +56,10 @@ LOOP_HZ = 50
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
+# Teleplot
+UDP_IP = "127.0.0.1" 
+UDP_PORT = 47269
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -64,7 +69,6 @@ def _open_teensy_serial(port_path: str) -> serial.Serial:
         timeout=0.005,
         write_timeout=0,
     )
-
 
 debug_action = [0.0, 0.0, 0.0, 0.0]
 
@@ -133,13 +137,13 @@ class TeensyInterface:
             if self._is_serial_gone(e):
                 self.reopen_serial()
     
-    def reset_I2C(self):
-        try:
-            self.ser.write(b"RESET_I2C\n")
-            print(f"{self.name}: Reset I2C.")
-        except (OSError, serial.SerialException) as e:
-            if self._is_serial_gone(e):
-                self.reopen_serial()
+    # def reset_I2C(self):
+    #     try:
+    #         self.ser.write(b"RESET_I2C\n")
+    #         print(f"{self.name}: Reset I2C.")
+    #     except (OSError, serial.SerialException) as e:
+    #         if self._is_serial_gone(e):
+    #             self.reopen_serial()
 
     def reboot_teensy(self):
         try:
@@ -207,14 +211,12 @@ class TeensyInterface:
             s = c.decode("utf-8", errors="ignore").strip()
             if s:
                 latest_line = s
-        # print(self.name)
-        # print(latest_line)
+                
         if latest_line:
             parts = latest_line.split(',')
             if len(parts) == 7:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
-                    # self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                     self.acc_mag = float(parts[6])
@@ -231,19 +233,19 @@ class TeensyInterface:
                 print(f"{self.name}: serial I/O error in set_motors; reopening…")
                 self.reopen_serial()
     
-    def align_imu_quaternions(self, quats_wxyz, imu_type):
-        r_raw = R.from_quat(quats_wxyz, scalar_first=True)
+    # def align_imu_quaternions(self, quats_wxyz, imu_type):
+    #     r_raw = R.from_quat(quats_wxyz, scalar_first=True)
         
-        if imu_type == 'Front':
-            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
+    #     if imu_type == 'Front':
+    #         r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
             
-        elif imu_type == 'Back':
-            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
+    #     elif imu_type == 'Back':
+    #         r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
             
-        r_global = r_raw * r_align
+    #     r_global = r_raw * r_align
         
-        aligned_wxyz = r_global.as_quat(scalar_first=True)
-        return aligned_wxyz.squeeze(0)
+    #     aligned_wxyz = r_global.as_quat(scalar_first=True)
+    #     return aligned_wxyz.squeeze(0)
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
@@ -314,11 +316,6 @@ def main():
     front.reset_IMU()
     back.reset_IMU()
     time.sleep(0.5)
-
-    # print("Resetting I2C comms...")
-    # front.reset_I2C()
-    # back.reset_I2C()
-    # time.sleep(0.5)
     
     # Flush any stale data that was transmitted before the reset happened
     front.flush_input_safe()
@@ -381,16 +378,13 @@ def main():
             back.update_sensor_data()
             
             action = [0, 0, 0, 0]
+            # To rotation matrices
+            front_rot = util.to_rotation_matrix(front.quat)
+            back_rot = util.to_rotation_matrix(back.quat)
 
             if args.debug:
                 action = list(debug_action)
-                front_rot = util.to_rotation_matrix(front.quat)
-                back_rot = util.to_rotation_matrix(back.quat)
-                # print("Front Rot:", np.round(front_rot, 2))
-                # print("Back Rot:", np.round(back_rot, 2))
             else:
-                front_rot = util.to_rotation_matrix(front.quat)
-                back_rot = util.to_rotation_matrix(back.quat)
                 # Ensure the joint array matches the exact order used in simulation
                 joints = np.array([front.m1_rad, front.m2_rad, back.m2_rad, back.m1_rad])
                 
@@ -425,6 +419,24 @@ def main():
                 back.acc_mag,
                 action[2], action[3],
             ])
+
+            # Teleplot format: "VariableName:Value\n"
+            teleplot_data = [
+                f"front_w:{front.quat[0]}", f"front_x:{front.quat[1]}", f"front_y:{front.quat[2]}", f"front_z:{front.quat[3]}",
+                f"front_m1:{front.m1_rad}", f"front_m2:{front.m2_rad}",
+                f"front_acc:{front.acc_mag}",
+                f"action_0:{action[0]}", f"action_1:{action[1]}",
+                f"back_w:{back.quat[0]}", f"back_x:{back.quat[1]}", f"back_y:{back.quat[2]}", f"back_z:{back.quat[3]}",
+                f"back_m1:{back.m1_rad}", f"back_m2:{back.m2_rad}",
+                f"back_acc:{back.acc_mag}",
+                f"action_2:{action[2]}", f"action_3:{action[3]}"
+            ]
+
+            # Join with newlines and add the final newline
+            teleplot_string = "\n".join(teleplot_data) + "\n"
+
+            # Send the data via your UDP socket
+            sock.sendto(teleplot_string.encode(), (UDP_IP, UDP_PORT))
 
             # Enforce timing
             elapsed = time.time() - loop_start
