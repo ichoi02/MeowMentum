@@ -53,6 +53,8 @@ SN_BACK  = "18452630"
 BAUD_RATE = 115200
 LOOP_HZ = 50
 
+CONTROL_DURATION = 0.8
+
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
@@ -271,8 +273,11 @@ def main():
     parser = argparse.ArgumentParser(description="Teensy Control Loop with Telemetry Logging")
     parser.add_argument(
         '--debug',
-        action='store_true',
-        help="P-control test: sinusoidal joint targets within ±DEBUG_JOINT_SWING_DEG (see CONFIG)",
+        action='store_true'
+    )
+    parser.add_argument(
+        '--motoroff',
+        action='store_true'
     )
     args = parser.parse_args()
 
@@ -336,8 +341,9 @@ def main():
         # Fetch the exact input name defined during your PyTorch export
         input_name = ort_session.get_inputs()[0].name 
 
-    front.start_all_motors()
-    back.start_all_motors()
+    if not args.motoroff:
+        front.start_all_motors()
+        back.start_all_motors()
     print("Press enter to start.")
     input()
 
@@ -446,7 +452,7 @@ def main():
             else:
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
                 
-            if time.time() - drop_started > 0.6:
+            if time.time() - drop_started > CONTROL_DURATION:
                 raise KeyboardInterrupt
 
     except KeyboardInterrupt:

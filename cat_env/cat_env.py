@@ -11,10 +11,10 @@ import os
 np.random.seed(None)
 
 # ---- train parameters ----
-w_pos = 1.0 # pose reward weight
-w_sm = -0.5 # smoothness penalty weight
-w_en = -5.0 # energy penalty weight
-k = 0.1  # tanh gain param
+w_pos = 1.0 
+w_sm = 0.1
+w_en = 0.1
+k = 0.1 # tanh gain param
 # --------------------------
 
 class CatEnv(MujocoEnv, EzPickle):
@@ -58,7 +58,7 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # Initialize variables
         self.steps = 0
-        self.max_steps = 37
+        self.max_steps = 32
         self.prev_action = np.zeros_like(action_space.shape)
 
         self.pd = []
@@ -141,16 +141,16 @@ class CatEnv(MujocoEnv, EzPickle):
         self.model.body_mass[:] = self.nominal_mass * mass_noise
 
         # Joint Damping
-        damping_noise = np.random.uniform(0.8, 1.2, size=self.nominal_damping.shape)
+        damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
         self.model.dof_damping[:] = self.nominal_damping * damping_noise
 
         # COM position
-        ipos_noise = np.random.uniform(-0.03, 0.03, size=self.nominal_ipos.shape)
+        ipos_noise = np.random.uniform(-0.05, 0.05, size=self.nominal_ipos.shape)
         ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
         self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
 
         # Inertia tensor
-        inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
+        inertia_noise = np.random.uniform(0.6, 1.4, size=self.nominal_inertia.shape)
         self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
@@ -221,15 +221,17 @@ class CatEnv(MujocoEnv, EzPickle):
         r_pos = reward_front*reward_rear
         r_pos *= np.tanh(self.steps*k)
         
-        # smoothness reward
         delta = action - self.prev_action
         r_sm = np.mean(delta**2)
 
-        # energy consumption reward
         ctrl = self.data.ctrl
         r_en = np.mean(ctrl**2)
 
-        return w_pos*r_pos + w_sm*r_sm + w_en*r_en
+        penalty_factor = np.exp(-(w_sm * r_sm + w_en * r_en))
+
+        final_reward = r_pos * penalty_factor
+
+        return final_reward
     
     def _is_terminated(self):
         return False

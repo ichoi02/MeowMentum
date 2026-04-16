@@ -1,6 +1,7 @@
 import gymnasium as gym
 from stable_baselines3 import PPO
 import cat_env
+import time
 
 def train():
     env = gym.make("Cat-v0", render_mode="rgb_array")
@@ -23,7 +24,7 @@ def train():
 
     model_path = "cat_controller"
     model.save(model_path)
-    print(f"Model saved to {model_path}.zip")
+    print(f"Model saved to {model_path}_{str(time.time())}.zip")
 
 if __name__ == "__main__":
     train()
