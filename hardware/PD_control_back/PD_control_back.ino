@@ -121,10 +121,6 @@ static bool bno08x_begin_and_enable() {
   if (!ok) {
     return false;
   }
-
-  // Quaternion for Roll=180, Pitch=0, Yaw=-90
-  sh2_Quaternion_t back_orientation = {0.7071068f, 0.7071068f, 0.0f, 0.0f}; // x, y, z, w
-  sh2_setReorientation(&back_orientation);
   
   bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
   bno08x.enableReport(SH2_ACCELEROMETER, 10000);
@@ -192,7 +188,8 @@ void loop() {
 
   // 1. Check for silent internal sensor resets
   if (bno08x.wasReset()) {
-    bno08x_begin_and_enable();
+    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
+    bno08x.enableReport(SH2_ACCELEROMETER, 10000);
     lastGameRotEventMs = millis();
   }
 

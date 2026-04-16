@@ -217,6 +217,7 @@ class TeensyInterface:
             if len(parts) == 7:
                 try:
                     self.quat = [float(x) for x in parts[:4]]
+                    self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                     self.acc_mag = float(parts[6])
@@ -233,19 +234,19 @@ class TeensyInterface:
                 print(f"{self.name}: serial I/O error in set_motors; reopening…")
                 self.reopen_serial()
     
-    # def align_imu_quaternions(self, quats_wxyz, imu_type):
-    #     r_raw = R.from_quat(quats_wxyz, scalar_first=True)
+    def align_imu_quaternions(self, quats_wxyz, imu_type):
+        r_raw = R.from_quat(quats_wxyz, scalar_first=True)
         
-    #     if imu_type == 'Front':
-    #         r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
+        if imu_type == 'Front':
+            r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)
             
-    #     elif imu_type == 'Back':
-    #         r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
+        elif imu_type == 'Back':
+            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
             
-    #     r_global = r_raw * r_align
+        r_global = r_align.inv() * r_raw * r_align
         
-    #     aligned_wxyz = r_global.as_quat(scalar_first=True)
-    #     return aligned_wxyz.squeeze(0)
+        aligned_wxyz = r_global.as_quat(scalar_first=True)
+        return aligned_wxyz.squeeze(0)
 
 def get_port_by_sn(serial_number):
     for port in serial.tools.list_ports.comports():
