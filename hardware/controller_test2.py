@@ -263,8 +263,7 @@ class TeensyInterface:
             r_align = R.from_euler('xyz', [0, 0, 90], degrees=True)  # -90은 아니겠지?
  
         elif imu_type == 'Back':
-            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
- 
+            r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)   ## XYZ and r_raw/ r_align
         r_global = r_raw * r_align
  
         aligned_wxyz = r_global.as_quat(scalar_first=True)
@@ -434,9 +433,9 @@ class ReducedModelController:
                  k_KS=1.0,         # overall gain (absorbs inertia ratio alpha)
                  sin_s_min=0.25,   # floor on |sin(q_spine)|
                  # ---- Spine targeting ----
-                 spine_target_deg=87.0,
+                 spine_target_deg=85.0,
                  spine_done_thresh_deg=8.0,
-                 settle_thresh_deg=5.0,
+                 settle_thresh_deg=10.0,
                  # ---- Joint limits (rad) ----
                  clip_roll=6.28, clip_tail=1.50, clip_spine=1.50,
                  # ---- Hardware sign convention ----

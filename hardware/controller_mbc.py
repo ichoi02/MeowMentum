@@ -274,6 +274,8 @@ class TeensyInterface:
         elif imu_type == 'Back':
             r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
         # sensor frame → body frame
+        else:
+            return np.asarray(gyro_sensor, dtype=float)
         return r_align.inv().apply(np.asarray(gyro_sensor, dtype=float))    
 
 def get_port_by_sn(serial_number):
@@ -371,10 +373,9 @@ def orientation_error_zaxis(R_WR):
 
     if sin_a < 1e-7:
         if cos_a > 0.0:
-            return np.zeros(3)
+            return np.zeros(3), 0.0
         else:
-            return np.array([0.0, 0.0, np.pi])
-            # return np.array([1.0, 0.0, 0.0]) * np.pi >> 이렇게 하면 스페셜 케이스 핸들이 되나?
+            return np.array([1.0, 0.0, 0.0]) * np.pi, np.pi  #이렇게 하면 스페셜 케이스 핸들이 되나?
     axis = cross/ sin_a 
     return axis * angle, angle
 
@@ -389,13 +390,13 @@ class MBController:
                 Kp_settle_diff = 0.3,
                 # Kane-Scher Feedforward Gains
                 k_KS = 1.0,         # overall gain (absorbs inertia ratio alpha)
-                sin_s_min = 0.25    # floor on |sin(q_spine)|
+                sin_s_min = 0.25,    # floor on |sin(q_spine)|
                 # Spine target parameters
                 spine_target_deg = 85.0,          # for PHASE_BEND_SPINE
                 spine_done_threshold_deg = 8.0,
                 settle_threshold_deg = 10.0,             # Below this err move to settle phase. (deg)
                 # Joint limits
-                max_roll = 6.28, max_tail = 1.55, max_spine = 1.55
+                max_roll = 6.28, max_tail = 1.55, max_spine = 1.55,
                 # Hardware sign config
                 front_roll_sign = -1.0, rear_roll_sign = +1.0, tail_sign = +1.0,
                 # Joint velocity estimator
@@ -409,13 +410,13 @@ class MBController:
         self.Kd_sr = Kd_settle_roll
         self.Kp_sp = Kp_settle_pitch
         self.Kd_sp = Kd_settle_pitch
-        self.Kp_sd = Kp_settle_diff
+        self.Kp_diff = Kp_settle_diff
         # Geometry / feedforward
         self.k_KS      = k_KS
         self.sin_s_min = sin_s_min
         self.spine_mag    = np.radians(spine_target_deg)
         self.spine_thresh = np.radians(spine_done_threshold_deg)
-        self.settle_thr   = np.radians(settle_thresh_deg)
+        self.settle_thr   = np.radians(settle_threshold_deg)
         # clips & signs
         self.clip_roll  = max_roll
         self.clip_tail  = max_tail
@@ -429,17 +430,17 @@ class MBController:
         # Runtime State
         self.phase = PHASE_BEND_SPINE
         self.theta_spine_target = None
-        self._q_perv = None
+        self._q_prev = None
         self._qdot_filt = np.zeros(4)
 
     def reset(self):
         self.phase = PHASE_BEND_SPINE
         self.theta_spine_target = None
-        self._q_perv = None
+        self._q_prev = None
         self._qdot_filt = np.zeros(4)
 
     def compute(self, front, back, dt):
-        # Joint Positions (rad) # Order: front roll, spine, tail, rear roll
+        ## Joint Positions (rad) # Order: front roll, spine, tail, rear roll
         q_j = np.array([front.m1_rad, front.m2_rad, back.m1_rad, back.m2_rad])
 
         if self._q_prev is None:
@@ -447,16 +448,139 @@ class MBController:
         
         qdot_raw = (q_j - self._q_prev) / max(dt, 1e-4)
         # Low-pass filter the raw veloccity estimate to reduce noise. 
-        self.__qdot_filt = (1.0 - self._lpf_a) * self._qdot_filt + self._lpf_a * qdot_raw
+        self._qdot_filt = (1.0 - self._lpf_a) * self._qdot_filt + self._lpf_a * qdot_raw
         self._q_prev = q_j.copy()
 
         q_fr, q_sp, q_ta, q_rr = q_j
-
-
         
+        
+        ## Rear Body Rotation and Wolrd-Frame Angular Velocity
+        q_wxyz = np.asarray(back.quat, dtype=float)
+        if np.linalg.norm(q_wxyz) < 1e-6:
+            q_wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+        
+        R_WR = R.from_quat(q_wxyz, scalar_first=True).as_matrix()
+        gyro_back = np.asarray(back.gyro, dtype=float)
+        omega_W = R_WR @ gyro_back
+
+        x_body = R_WR[:,0]
+        y_body = R_WR[:,1]
+
+        # Axis angle error and Body frame decomposition
+        err_vec, err_angle = orientation_error_zaxis(R_WR)
+        roll_err = float(err_vec @ x_body)             
+        pitch_err = float(err_vec @ y_body)
+        omega_roll = float(omega_W @ x_body)
+        omega_pitch = float(omega_W @ y_body)
+
+        # Spine target sign (Only at start)
+        if self.theta_spine_target is None:
+            proj = float(err_vec @ y_body)
+            # sign = np.sign(proj) if abs(proj) > 0.2 else 1.0
+            sign = 1.0
+            self.theta_spine_target = sign * self.spine_mag
+
+        # Derive phi_diff (front/rear roll disagrement)
+        phi_diff = self.fr_sign * q_fr - self.rr_sign * q_rr
+
+        ## Phase Transitions (Spine Bend → Righting → Settle)
+        prev_phase = self.phase
+        if self.phase == PHASE_BEND_SPINE:
+            if abs(q_sp - self.theta_spine_target) < self.spine_thresh:
+                self.phase = PHASE_RIGHTING
+
+        elif self.phase == PHASE_RIGHTING:
+            if abs(roll_err) < self.settle_thr:
+                self.phase = PHASE_SETTLE
+        
+        # Phase transition printing
+        if self.phase != prev_phase:
+            print(f"[phase] {prev_phase} -> {self.phase} | "
+                  f"err={np.degrees(err_angle):+6.1f} deg | "
+                  f"spine={np.degrees(q_sp):+6.1f} deg")
+        
+        # Phase Control Law
+        if self.phase == PHASE_BEND_SPINE:
+            q_des = self.spine_bend(q_fr, q_ta, q_rr)
+        elif self.phase == PHASE_RIGHTING:
+            q_des = self.righting(q_fr, q_sp, q_ta, q_rr,
+                                       roll_err, pitch_err,
+                                       omega_roll, omega_pitch,
+                                       dt)
+        else:
+            q_des = self.settle(q_fr, q_sp, q_ta, q_rr,
+                                     roll_err, pitch_err,
+                                     omega_roll, omega_pitch,
+                                     phi_diff, dt)
 
 
+        # Joint Limit
+        q_des[JI_FR] = np.clip(q_des[JI_FR], -self.clip_roll,  self.clip_roll)
+        q_des[JI_RR] = np.clip(q_des[JI_RR], -self.clip_roll,  self.clip_roll)
+        q_des[JI_SP] = np.clip(q_des[JI_SP], -self.clip_spine, self.clip_spine)
+        q_des[JI_TA] = np.clip(q_des[JI_TA], -self.clip_tail,  self.clip_tail)
+ 
+ 
+        dbg = {
+            "phase":       self.phase,
+            "err_angle":   err_angle,
+            "roll_err":    roll_err,
+            "pitch_err":   pitch_err,
+            "omega_roll":  omega_roll,
+            "omega_pitch": omega_pitch,
+            "phi_diff":    phi_diff,
+            "q_spine":     q_sp,
+            "theta_spine_target": self.theta_spine_target,
+        }
+        return q_des, self.phase, dbg
     
+## Phase Control Law
+
+    # Phase 0: Spine Bending
+    def spine_bend(self, q_fr, q_ta, q_rr):
+        q_des = np.zeros(4)
+        q_des[JI_FR] = 0.0
+        q_des[JI_SP] = self.theta_spine_target
+        q_des[JI_TA] = 0.0
+        q_des[JI_RR] = 0.0
+        return q_des
+
+    # Phase 1: Righting
+    def righting(self, q_fr, q_sp, q_ta, q_rr, roll_err, pitch_err, omega_roll, omega_pitch, dt):
+        # Deisired body x angular rate
+        omega_des_x = self.Kp_r*roll_err - self.Kd_r * omega_roll
+
+        # Kane-Scher inversion: map body rate -> coupled-roll joint rate
+        sin_raw = np.sin(q_sp)
+        if abs(sin_raw) < self.sin_s_min:
+            sin_s = self.sin_s_min if sin_raw >= 0 else -self.sin_s_min
+        else:
+            sin_s = sin_raw
+    
+        qdot_cpl_des = self.k_KS * omega_des_x / sin_s
+        dq_cpl  = qdot_cpl_des * dt
+    
+        # Tail does pitch
+        u_tail = self.Kp_p * pitch_err - self.Kd_p * omega_pitch
+    
+        q_des = np.zeros(4)
+        q_des[JI_FR] = q_fr + self.fr_sign * dq_cpl
+        q_des[JI_RR] = q_rr + self.rr_sign * dq_cpl
+        q_des[JI_SP] = self.theta_spine_target
+        q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
+        return q_des
+
+    def settle(self, q_fr, q_sp, q_ta, q_rr, roll_err, pitch_err, omega_roll, omega_pitch, phi_diff, dt):
+        # Roll residual + two-body disagreement
+        u_roll = (self.Kp_sr  * roll_err - self.Kd_sr * omega_roll - self.Kp_diff * phi_diff)
+        u_tail = self.Kp_sp * pitch_err - self.Kd_sp * omega_pitch
+    
+        q_des = np.zeros(4)
+        q_des[JI_FR] = q_fr + self.fr_sign * u_roll * dt
+        q_des[JI_RR] = q_rr + self.rr_sign * u_roll * dt
+        q_des[JI_SP] = 0.0                                    # spine relaxes to neutral
+        q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
+        return q_des
 
 
 
@@ -541,6 +665,16 @@ def main():
     start_time = time.time()
     log = []
 
+    controller = MBController(
+        front_roll_sign=front_roll_sign,
+        rear_roll_sign=rear_roll_sign,
+        tail_sign=tail_sign,
+        spine_target_deg=spine_target,
+        spine_done_threshold_deg=spine_target_threshold,
+        settle_threshold_deg=roll_threshold,
+    )
+
+
     # Set Initial Phase    
     phase = PHASE_BEND_SPINE
 
@@ -564,7 +698,7 @@ def main():
             front.update_sensor_data()
             back.update_sensor_data()
             
-            action = [0, 0, 0, 0]
+            action = [0.0, 0.0, 0.0, 0.0]
 
             pitch_err_log = float("nan")
             roll_err_log = float("nan")
@@ -576,12 +710,15 @@ def main():
             else:
                 # Before trigger : Hold [0 0 0 0] Pose
                 if USE_DROP_TRIGGER and not controller_started:
-                    action = [0, 0, 0, 0]
+                    action = [0.0, 0.0, 0.0, 0.0]
+                    phase  = PHASE_BEND_SPINE
+
 
                     # Controller On : Beging Bend Spine Phase
                     if back.acc_mag < drop_acc_threshold:
                         controller_started = True
                         controller_start_time = loop_start
+                        controller.reset()   # Reset controller state at trigger    
                         phase = PHASE_BEND_SPINE
                         print(f"DROP TRIGGERED at t={t:.3f}s | acc_trigger_mag={back.acc_mag:.3f}")
 
@@ -595,78 +732,44 @@ def main():
                         front.stop_all_motors()
                         back.stop_all_motors()
                         break
+                    
+                    # Controller Compute
+                    q_des, phase, dbg = controller.compute(front, back, dt=1.0 / LOOP_HZ)
 
-                    ## Phase Controller
-                    state = get_joint_state(front, back)
-                    state = compute_derived_state(state)
-                    roll_err = compute_roll_error(state)
-                    pitch_err = compute_pitch_error(state)
+                    # action order: [front_roll, spine, tail, rear_roll]
+                    action = [float(q_des[JI_FR]),
+                              float(q_des[JI_SP]),
+                              float(q_des[JI_TA]),
+                              float(q_des[JI_RR])]
+                    
 
-                    # Logging for debug
-                    pitch_err_log = pitch_err
-                    roll_err_log = roll_err
-                    phi_diff_log = state["phi_diff"]
-                    phi_coupl_log = state["phi_coupl"]
-
-                    cmd_front_roll = 0.0
-                    cmd_rear_roll = 0.0
-                    cmd_spine = 0.0
-                    cmd_tail = 0.0
-
-                    if phase == PHASE_BEND_SPINE:
-                        cmd_front_roll = 0.0
-                        cmd_rear_roll = 0.0
-                        cmd_spine = np.deg2rad(spine_target)
-                        cmd_tail = 0.0
-
-                        if abs(state["q_spine"] - np.deg2rad(spine_target)) < np.deg2rad(spine_target_threshold):
-                            phase = PHASE_RIGHTING
-
-                    elif phase == PHASE_RIGHTING:
-                        u_roll = -1.0 * roll_err 
-                        cmd_front_roll = front_roll_sign * u_roll
-                        cmd_rear_roll = rear_roll_sign * u_roll
-                        cmd_spine = Kp_spine*np.deg2rad(spine_target)
-                        cmd_tail = tail_sign * Kp_tail * pitch_err
-
-                        if abs(roll_err) < np.deg2rad(roll_threshold): 
-                            phase = PHASE_SETTLE  
-
-                    # If 여기서 개빡츼게 -> Divide settling phase into 2 diff phase.
-                    elif phase == PHASE_SETTLE:
-                        u_roll = -Kp_settle_roll * roll_err - Kp_settle_roll_diff * state["phi_diff"]
-                        cmd_front_roll = front_roll_sign * u_roll
-                        cmd_rear_roll = rear_roll_sign * u_roll
-                        cmd_spine = 0.0
-                        cmd_tail = 0.0
-
-                    cmd_front_roll = np.clip(cmd_front_roll, -6.28, 6.28)
-                    cmd_rear_roll  = np.clip(cmd_rear_roll,  -6.28, 6.28)
-                    cmd_tail       = np.clip(cmd_tail,       -1.55, 1.55)
-                    cmd_spine      = np.clip(cmd_spine,      -1.55, 1.55)
-
-                    action = [cmd_front_roll, cmd_spine, cmd_tail, cmd_rear_roll]  
-
-            # Logging for debug    
+                    # Diagnostics (match existing log-variable names)
+                    pitch_err_log = dbg["pitch_err"]
+                    roll_err_log  = dbg["roll_err"]
+                    phi_diff_log  = dbg["phi_diff"]
+                    phi_coupl_log = 0.5 * (front_roll_sign * front.m1_rad
+                                           + rear_roll_sign * back.m2_rad)                    # Diagnostics (match existing log-variable names)
+            
+            # Phase and cmd Logging
             phase_log = phase
             cmd_front_roll_log = action[0]
             cmd_spine_log      = action[1]
             cmd_tail_log       = action[2]
             cmd_rear_roll_log  = action[3]
-
+ 
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
-
+ 
             # Debug print
             if t - last_debug_print >= 0.1:   # print every 0.1 s
                 print(
-                    f"t={t:.2f} | phase={phase_log} | roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
+                    f"t={t:.2f} | phase={phase_log} | "
+                    f"roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
                     f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
                     f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
                 )
                 last_debug_print = t
-
 
 
             log.append([
