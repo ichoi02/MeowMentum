@@ -7,6 +7,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from stable_baselines3 import PPO
 import cat_env
 import cat_env.env_util as util
+import time
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -138,7 +139,7 @@ def run_dagger():
             D_actions = D_actions[-max_buffer_size:]
 
     # Changed save filename to reflect new observation space
-    torch.save(student.state_dict(), "student_policy.pth")
+    torch.save(student.state_dict(), f"student_policy_{str(time.time())}.pth")
 
 if __name__ == "__main__":
     run_dagger()
