@@ -491,6 +491,9 @@ class MBController:
         pitch_err = float(err_vec @ y_body)
         omega_roll = float(omega_W @ x_body)
         omega_pitch = float(omega_W @ y_body)
+        state = get_joint_state(front, back)
+        state = compute_derived_state(state)
+        roll_err_debug = compute_roll_error(state)
 
         # Spine target sign (Only at start)
         if self.theta_spine_target is None:
@@ -519,12 +522,13 @@ class MBController:
                 f"ctrl_roll={np.degrees(roll_err):+6.1f} deg | "
                 f"ctrl_pitch={np.degrees(pitch_err):+6.1f} deg | "
                 f"spine={np.degrees(q_sp):+6.1f} deg")
+            
         # Phase Control Law
         if self.phase == PHASE_BEND_SPINE:
             q_des = self.spine_bend(q_fr, q_ta, q_rr)
         elif self.phase == PHASE_RIGHTING:
             q_des = self.righting(q_fr, q_sp, q_ta, q_rr,
-                                       phase_roll_err, pitch_err,       # phase_roll_err -> roll_err
+                                       roll_err_debug, pitch_err,       # roll_err_degbug -> roll_err
                                        omega_roll, omega_pitch,
                                        dt)
         else:
@@ -551,6 +555,8 @@ class MBController:
             "omega_roll":  omega_roll,
             "omega_pitch": omega_pitch,
 
+            "roll_err_debug": roll_err_debug,
+
             # Phase Trnasition-use error (pure Euler angle)
             "phase_roll_err": phase_roll_err,
             "rear_roll": rear_roll,
@@ -575,7 +581,7 @@ class MBController:
         return q_des
 
     # Phase 1: Righting
-    def righting(self, q_fr, q_sp, q_ta, q_rr, phase_roll_err, pitch_err, omega_roll, omega_pitch, dt):     # phase_roll_err -> roll_err
+    def righting(self, q_fr, q_sp, q_ta, q_rr, roll_err_debug, pitch_err, omega_roll, omega_pitch, dt):     # phase_roll_err -> roll_err
         # Deisired body x angular rate
         # omega_des_x = self.Kp_r*roll_err - self.Kd_r * omega_roll
 
@@ -598,7 +604,7 @@ class MBController:
         # q_des[JI_SP] = self.theta_spine_target
         # q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
 
-        u_roll = -1.0 * phase_roll_err 
+        u_roll = -1.0 * roll_err_debug 
         cmd_front_roll = front_roll_sign * u_roll
         cmd_rear_roll = rear_roll_sign * u_roll
         cmd_spine = Kp_spine*np.deg2rad(spine_target)
@@ -745,6 +751,7 @@ def main():
             pitch_err_ctrl_log = float("nan")
             roll_err_ctrl_log = float("nan")
             roll_err_log = float("nan")
+            roll_err_debug_log = float("nan")
             phi_diff_log = float("nan")
             phi_coupl_log = float("nan")
 
@@ -772,6 +779,22 @@ def main():
                     ctrl_t = loop_start - controller_start_time if controller_start_time is not None else 0.0
                     if ctrl_t >= time_max:
                         print(f"Timeout reached ({time_max:.1f} s after trigger). Stopping...")
+                        if log:
+                            filename = f"telemetry/telemetry_{int(time.time())}.csv"
+                            print(f"Saving {len(log)} records to {filename}...")
+                            with open(filename, 'w', newline='') as f:
+                                writer = csv.writer(f)
+                                writer.writerow(["Time", 
+                                                "F_Q0", "F_Q1", "F_Q2", "F_Q3",
+                                                "F_GX", "F_GY", "F_GZ",
+                                                "F_M1", "F_M2", 
+                                                "F_ACC", "Cmd_F1", "Cmd_F2", 
+                                                "B_Q0", "B_Q1", "B_Q2", "B_Q3", 
+                                                "B_GX", "B_GY", "B_GZ",
+                                                "B_M1", "B_M2",
+                                                "B_ACC", "Cmd_B1", "Cmd_B2"])
+                                writer.writerows(log)
+                                print("Done.")
                         front.stop_all_motors()
                         back.stop_all_motors()
                         break
@@ -789,6 +812,7 @@ def main():
                     # Diagnostics (match existing log-variable names)
                     pitch_err_ctrl_log = dbg["pitch_err"]    # Pitch Control
                     roll_err_ctrl_log  = dbg["roll_err"]     # Roll Control
+                    roll_err_debug_log = dbg["roll_err_debug"]
                     roll_err_log  = dbg["phase_roll_err"]    # rear roll error for phase transition
                     phi_diff_log  = dbg["phi_diff"]
                     phi_coupl_log = 0.5 * (front_roll_sign * front.m1_rad
@@ -808,7 +832,7 @@ def main():
             if t - last_debug_print >= 0.1:   # print every 0.1 s
                 print(
                     f"t={t:.2f} | phase={phase_log} | "
-                    f"roll_ctrl_err={roll_err_ctrl_log:.3f} | pitch_ctrl_err={pitch_err_ctrl_log:.3f} | "
+                    f"roll_ctrl_err={roll_err_ctrl_log:.3f} | pitch_ctrl_err={pitch_err_ctrl_log:.3f} | roll_err_debug={roll_err_debug_log:.3f} |"
                     f"rear_roll_err={roll_err_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
                     f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
