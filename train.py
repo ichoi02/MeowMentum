@@ -22,9 +22,9 @@ def train():
         progress_bar=True
         )
 
-    model_path = "cat_controller"
+    model_path = f"cat_controller_{str(time.time())}"
     model.save(model_path)
-    print(f"Model saved to {model_path}_{str(time.time())}.zip")
+    print(f"Model saved")
 
 if __name__ == "__main__":
     train()
