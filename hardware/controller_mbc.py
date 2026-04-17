@@ -54,8 +54,8 @@ SERIAL_DRAIN_MAX_LINES = 32
 
 # Drop Trigger
 USE_DROP_TRIGGER = True
-drop_acc_threshold = 1.0   # m/s^2
-time_max = 0.7            
+drop_acc_threshold = 2.9   # m/s^2
+time_max = 0.9            
 
 # Each motor sign differnece (Front and Rear Roll Sign Difference)
 front_roll_sign = -1.0
@@ -347,6 +347,21 @@ def compute_derived_state(state):
 
     return {**state, "phi_coupl": phi_coupl, "phi_diff": phi_diff}
 
+def wrap_to_pi(angle):
+    return (angle + np.pi) % (2.0 * np.pi) -np.pi
+
+def pure_roll_error_from_quat_wxyz(q_wxyz, target_roll = 0.0):
+    q_wxyz = np.asarray(q_wxyz, dtype=float)
+    n = np.linalg.norm(q_wxyz)
+    if n < 1e-8:
+        q_wxyz = np.array([1.0, 0.0, 0.0, 0.0], dtype = float)
+    else:
+        q_wxyz = q_wxyz / n
+    roll, pitch, yaw = quat_wxyz_to_euler_xyz(q_wxyz)
+    roll_err = wrap_to_pi(roll - target_roll)
+    return roll_err, roll, pitch, yaw
+    
+
 
 ########
 
@@ -463,9 +478,13 @@ class MBController:
         gyro_back = np.asarray(back.gyro, dtype=float)
         omega_W = R_WR @ gyro_back
 
+        # Compute roll error / roll, pitch, yaw
+        phase_roll_err, rear_roll, rear_pitch, rear_yaw = pure_roll_error_from_quat_wxyz(q_wxyz, target_roll = 0.0)
+
         x_body = R_WR[:,0]
         y_body = R_WR[:,1]
 
+        # May remove later. Not a pure roll_err.
         # Axis angle error and Body frame decomposition
         err_vec, err_angle = orientation_error_zaxis(R_WR)
         roll_err = float(err_vec @ x_body)             
@@ -490,7 +509,7 @@ class MBController:
                 self.phase = PHASE_RIGHTING
 
         elif self.phase == PHASE_RIGHTING:
-            if abs(roll_err) < self.settle_thr:
+            if abs(phase_roll_err) < self.settle_thr:
                 self.phase = PHASE_SETTLE
         
         # Phase transition printing
@@ -524,10 +543,19 @@ class MBController:
         dbg = {
             "phase":       self.phase,
             "err_angle":   err_angle,
+
+            # Controller-use error (z-axis alignment based decompostion)
             "roll_err":    roll_err,
             "pitch_err":   pitch_err,
             "omega_roll":  omega_roll,
             "omega_pitch": omega_pitch,
+
+            # Phase Trnasition-use error (pure Euler angle)
+            "phase_roll_err": phase_roll_err,
+            "rear_roll": rear_roll,
+            "rear_pitch": rear_pitch,
+            "rear_yaw" : rear_yaw,
+
             "phi_diff":    phi_diff,
             "q_spine":     q_sp,
             "theta_spine_target": self.theta_spine_target,
@@ -744,8 +772,9 @@ def main():
                     
 
                     # Diagnostics (match existing log-variable names)
-                    pitch_err_log = dbg["pitch_err"]
-                    roll_err_log  = dbg["roll_err"]
+                    pitch_err_ctrl_log = dbg["pitch_err"]    # Pitch Control
+                    roll_err_ctrl_log  = dbg["roll_err"]     # Roll Control
+                    roll_err_log  = dbg["phase_roll_err"]    # rear roll error for phase transition
                     phi_diff_log  = dbg["phi_diff"]
                     phi_coupl_log = 0.5 * (front_roll_sign * front.m1_rad
                                            + rear_roll_sign * back.m2_rad)                    # Diagnostics (match existing log-variable names)
@@ -764,8 +793,8 @@ def main():
             if t - last_debug_print >= 0.1:   # print every 0.1 s
                 print(
                     f"t={t:.2f} | phase={phase_log} | "
-                    f"roll_err={roll_err_log:.3f} | pitch_err={pitch_err_log:.3f} | "
-                    f"phi_coupl={phi_coupl_log:.3f} | phi_diff={phi_diff_log:.3f} | "
+                    f"roll_ctrl_err={roll_err_ctrl_log:.3f} | pitch_ctrl_err={pitch_err_ctrl_log:.3f} | "
+                    f"rear_roll_err={roll_err_log:.3f} | phi_diff={phi_diff_log:.3f} | "
                     f"cmd=[fr={cmd_front_roll_log:.3f}, sp={cmd_spine_log:.3f}, "
                     f"ta={cmd_tail_log:.3f}, rr={cmd_rear_roll_log:.3f}]"
                 )

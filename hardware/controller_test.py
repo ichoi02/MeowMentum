@@ -54,7 +54,7 @@ SERIAL_DRAIN_MAX_LINES = 32
 # Drop Trigger
 USE_DROP_TRIGGER = True
 drop_acc_threshold = 1.0   # m/s^2
-time_max = 0.7            
+time_max = 10#0.7            
 
 # Each motor sign differnece (Front and Rear Roll Sign Difference)
 front_roll_sign = -1.0
@@ -335,6 +335,20 @@ def compute_derived_state(state):
 
     return {**state, "phi_coupl": phi_coupl, "phi_diff": phi_diff}
 
+def wrap_to_pi(angle):
+    return (angle + np.pi) % (2.0 * np.pi) -np.pi
+
+def pure_roll_error_from_quat_wxyz(q_wxyz, target_roll = 0.0):
+    q_wxyz = np.asarray(q_wxyz, dtype=float)
+    n = np.linalg.norm(q_wxyz)
+    if n < 1e-8:
+        q_wxyz = np.array([1.0, 0.0, 0.0, 0.0], dtype = float)
+    else:
+        q_wxyz = q_wxyz / n
+    roll, pitch, yaw = quat_wxyz_to_euler_xyz(q_wxyz)
+    roll_err = wrap_to_pi(roll - target_roll)
+    return roll_err, roll, pitch, yaw
+    
 
 ########
 
@@ -401,8 +415,8 @@ def main():
 
 
 
-    front.start_all_motors()
-    back.start_all_motors()
+    # front.start_all_motors()
+    # back.start_all_motors()
     print("Press any key to start.")
     input()
 
@@ -458,7 +472,8 @@ def main():
                     action = [0, 0, 0, 0]
 
                     # Controller On : Beging Bend Spine Phase
-                    if back.acc_mag < drop_acc_threshold:
+                    #if back.acc_mag < drop_acc_threshold:
+                    if True:
                         controller_started = True
                         controller_start_time = loop_start
                         phase = PHASE_BEND_SPINE
