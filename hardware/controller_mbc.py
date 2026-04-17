@@ -397,7 +397,7 @@ def orientation_error_zaxis(R_WR):
 class MBController:
     def __init__(self,
                 # Phase 1 (Righting) Gains
-                Kp_right = 6.0, Kd_right = 0.6,
+                Kp_right = 12.0, Kd_right = 0.6,
                 Kp_pitch = 0.8, Kd_pitch = 0.10,
                 # Phase 2 (Settle) Gains
                 Kp_settle_roll = 1.0, Kd_settle_roll = 0.15,
@@ -515,15 +515,16 @@ class MBController:
         # Phase transition printing
         if self.phase != prev_phase:
             print(f"[phase] {prev_phase} -> {self.phase} | "
-                  f"err={np.degrees(err_angle):+6.1f} deg | "
-                  f"spine={np.degrees(q_sp):+6.1f} deg")
-        
+                f"phase_roll={np.degrees(phase_roll_err):+6.1f} deg | "
+                f"ctrl_roll={np.degrees(roll_err):+6.1f} deg | "
+                f"ctrl_pitch={np.degrees(pitch_err):+6.1f} deg | "
+                f"spine={np.degrees(q_sp):+6.1f} deg")
         # Phase Control Law
         if self.phase == PHASE_BEND_SPINE:
             q_des = self.spine_bend(q_fr, q_ta, q_rr)
         elif self.phase == PHASE_RIGHTING:
             q_des = self.righting(q_fr, q_sp, q_ta, q_rr,
-                                       roll_err, pitch_err,
+                                       phase_roll_err, pitch_err,       # phase_roll_err -> roll_err
                                        omega_roll, omega_pitch,
                                        dt)
         else:
@@ -574,28 +575,41 @@ class MBController:
         return q_des
 
     # Phase 1: Righting
-    def righting(self, q_fr, q_sp, q_ta, q_rr, roll_err, pitch_err, omega_roll, omega_pitch, dt):
+    def righting(self, q_fr, q_sp, q_ta, q_rr, phase_roll_err, pitch_err, omega_roll, omega_pitch, dt):     # phase_roll_err -> roll_err
         # Deisired body x angular rate
-        omega_des_x = self.Kp_r*roll_err - self.Kd_r * omega_roll
+        # omega_des_x = self.Kp_r*roll_err - self.Kd_r * omega_roll
 
-        # Kane-Scher inversion: map body rate -> coupled-roll joint rate
-        sin_raw = np.sin(q_sp)
-        if abs(sin_raw) < self.sin_s_min:
-            sin_s = self.sin_s_min if sin_raw >= 0 else -self.sin_s_min
-        else:
-            sin_s = sin_raw
+        # # Kane-Scher inversion: map body rate -> coupled-roll joint rate
+        # sin_raw = np.sin(q_sp)
+        # if abs(sin_raw) < self.sin_s_min:
+        #     sin_s = self.sin_s_min if sin_raw >= 0 else -self.sin_s_min
+        # else:
+        #     sin_s = sin_raw
     
-        qdot_cpl_des = self.k_KS * omega_des_x / sin_s
-        dq_cpl  = qdot_cpl_des * dt
+        # qdot_cpl_des = self.k_KS * omega_des_x / sin_s
+        # dq_cpl  = qdot_cpl_des * dt
     
-        # Tail does pitch
-        u_tail = self.Kp_p * pitch_err - self.Kd_p * omega_pitch
-    
+        # # Tail does pitch
+        # u_tail = self.Kp_p * pitch_err - self.Kd_p * omega_pitch
+
+        # q_des = np.zeros(4)
+        # q_des[JI_FR] = q_fr + self.fr_sign * dq_cpl
+        # q_des[JI_RR] = q_rr + self.rr_sign * dq_cpl
+        # q_des[JI_SP] = self.theta_spine_target
+        # q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
+
+        u_roll = -1.0 * phase_roll_err 
+        cmd_front_roll = front_roll_sign * u_roll
+        cmd_rear_roll = rear_roll_sign * u_roll
+        cmd_spine = Kp_spine*np.deg2rad(spine_target)
+        cmd_tail = tail_sign * Kp_tail * pitch_err
+        
         q_des = np.zeros(4)
-        q_des[JI_FR] = q_fr + self.fr_sign * dq_cpl
-        q_des[JI_RR] = q_rr + self.rr_sign * dq_cpl
+        q_des[JI_FR] = cmd_front_roll
+        q_des[JI_RR] = cmd_rear_roll
         q_des[JI_SP] = self.theta_spine_target
-        q_des[JI_TA] = q_ta + self.ta_sign * u_tail * dt
+        q_des[JI_TA] = cmd_tail
+
         return q_des
 
     def settle(self, q_fr, q_sp, q_ta, q_rr, roll_err, pitch_err, omega_roll, omega_pitch, phi_diff, dt):
@@ -728,7 +742,8 @@ def main():
             
             action = [0.0, 0.0, 0.0, 0.0]
 
-            pitch_err_log = float("nan")
+            pitch_err_ctrl_log = float("nan")
+            roll_err_ctrl_log = float("nan")
             roll_err_log = float("nan")
             phi_diff_log = float("nan")
             phi_coupl_log = float("nan")

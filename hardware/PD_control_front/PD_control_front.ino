@@ -42,8 +42,8 @@ bool ENCODER2_REVERSED = true;
 // 3. CONTROL SETTINGS
 // ==========================================
 // PD gains
-double Kp = 1000.0;
-double Kd = 10.0;
+double Kp = 2048.0;
+double Kd = 20.48;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;
@@ -109,7 +109,7 @@ void clearI2CBus() {
   Wire.begin();
   
   // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(1000); 
+  Wire.setTimeout(10); 
   Wire.setClock(50000); 
 }
 
@@ -174,6 +174,7 @@ void setup() {
 
   // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
+  Wire.setTimeout(10);
   Wire.setClock(50000); // 50kHz for long wire stability
   
   if (!bno08x_begin_and_enable()) {
