@@ -42,8 +42,10 @@ bool ENCODER2_REVERSED = true;
 // 3. CONTROL SETTINGS
 // ==========================================
 // PD gains
-double Kp = 1024.0;
-double Kd = 10.24;
+double Kp1 = 1024.0;
+double Kd1 = 10.24;
+double Kp2 = 1024.0;
+double Kd2 = 10.24;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;
@@ -273,7 +275,7 @@ void runController(double dt) {
     stopMotor1();
   } else {
     double deriv1 = (err1 - lastErr1) / dt;
-    double cmd1 = (Kp * err1) + (Kd * deriv1);
+    double cmd1 = (Kp1 * err1) + (Kd1 * deriv1);
     if (MOTOR1_REVERSED) cmd1 = -cmd1;
     driveMotor1(cmd1);
   }
@@ -284,7 +286,7 @@ void runController(double dt) {
     stopMotor2();
   } else {
     double deriv2 = (err2 - lastErr2) / dt;
-    double cmd2 = (Kp * err2) + (Kd * deriv2);
+    double cmd2 = (Kp2 * err2) + (Kd2 * deriv2);
     if (MOTOR2_REVERSED) cmd2 = -cmd2;
     driveMotor2(cmd2);
   }
