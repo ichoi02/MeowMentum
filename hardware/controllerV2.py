@@ -337,7 +337,7 @@ def main():
         except (AttributeError, TypeError):
             pass # FIXED: Changed 'parse_args' to 'pass'
         
-        ort_session = ort.InferenceSession("cat_controller.onnx")
+        ort_session = ort.InferenceSession("cat_controller2.onnx")
         # Fetch the exact input name defined during your PyTorch export
         input_name = ort_session.get_inputs()[0].name 
 
@@ -363,7 +363,7 @@ def main():
             loop_start = time.time()
             front.update_sensor_data()
             print(front.acc_mag)
-            if front.acc_mag < 1.0:
+            if front.acc_mag < 3.0:
                 print("Drop")
                 drop_started = time.time()
                 break
