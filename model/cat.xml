@@ -23,7 +23,6 @@
       <freejoint name="root"/>
       <inertial pos="0 0 0" mass="0.772" diaginertia="0.0012867 0.0012867 0.0012867"/>
       <geom type="box" size="0.05 0.05 0.05" material="color1"/>
-      <site name="front_imu_site" pos="0 0 0" euler="0 0 -90" size="0.01" type="sphere" rgba="1 0 0 1"/>
       <geom name="front_paw1" type="sphere" size="0.02" pos="-0.05 0.05 -0.05" mass="0" material="color1"/>
       <geom name="front_paw2" type="sphere" size="0.02" pos="-0.05 -0.05 -0.05" mass="0" material="color1"/>
       
@@ -41,7 +40,6 @@
             <joint name="rot2" type="hinge" axis="1 0 0" range="-7.28 7.28"/>
             <inertial pos="0 0 0" mass="0.448" diaginertia="0.0007467 0.0007467 0.0007467"/>
             <geom type="box" size="0.05 0.05 0.05" material="color3"/>
-            <site name="rear_imu_site" pos="0 0 0" euler="180 0 -90" size="0.01" type="sphere" rgba="1 0 0 1"/>
             <geom name="rear_paw1" type="sphere" size="0.02" pos="0.05 0.05 -0.05" mass="0" material="color3"/>
             <geom name="rear_paw2" type="sphere" size="0.02" pos="0.05 -0.05 -0.05" mass="0" material="color3"/>
 
@@ -63,10 +61,5 @@
     <motor name="motor3" joint="rot2" ctrllimited="true" ctrlrange="-0.17 0.17"/>
     <motor name="motor4" joint="tail" ctrllimited="true" ctrlrange="-0.17 0.17"/>
   </actuator>
-
-  <sensor>
-    <framequat name="front_imu" objtype="site" objname="front_imu_site"/>
-    <framequat name="rear_imu" objtype="site" objname="rear_imu_site"/>
-  </sensor>
 
 </mujoco>

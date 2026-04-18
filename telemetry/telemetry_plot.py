@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
 
 # Read the data into a Pandas DataFrame
-df = pd.read_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1775333675.csv")
+df = pd.read_csv("/Users/itak/Documents/CMU/24775_Bioinspired_Robot/MeowMentum/telemetry/telemetry_1776463636.csv")
 
 # Create the plot
 plt.figure(figsize=(10, 6))
@@ -23,7 +23,10 @@ plt.figure(figsize=(10, 6))
 # plt.plot(df['Time'], front_rot, label='Front')
 # plt.plot(df['Time'], back_rot, label='Back')
 
-plt.plot(df['F_M1', 'Cmd_F1'])
+plt.plot(df['F_M1'], label='f1')
+plt.plot(df['Cmd_F1'], label='c1')
+plt.plot(df['F_M2'], label='f2')
+plt.plot(df['Cmd_F2'], label='c2')
 
 # Loop through all columns except 'Time' to plot them
 # for col in df.columns:
