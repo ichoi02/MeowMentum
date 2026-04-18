@@ -460,7 +460,11 @@ def main():
         front.stop_all_motors()
         back.stop_all_motors()
         if log:
-            filename = f"telemetry/telemetry_{int(time.time())}.csv"
+            time_str = str(int(time.time()))
+            if not args.debug:
+                filename = f"telemetry/telemetry_{time_str}.csv"
+            else:
+                filename = f"telemetry/telemetry_{time_str}_debug.csv"
             print(f"Saving {len(log)} records to {filename}...")
             with open(filename, 'w', newline='') as f:
                 writer = csv.writer(f)

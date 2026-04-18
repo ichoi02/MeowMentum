@@ -104,10 +104,8 @@ void clearI2CBus() {
   delay(10);
   
   Wire.begin();
-  
-  // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(10); 
-  Wire.setClock(50000); 
+  Wire.setTimeout(50); 
+  Wire.setClock(100000);
 }
 
 static bool bno08x_begin_and_enable() {
@@ -168,10 +166,9 @@ void setup() {
   lastControlMicros = micros();
   lastPrintMillis = millis();
 
-  // IMU Setup (retry: transient I2C glitches on power-up)
   Wire.begin();
-  Wire.setTimeout(10); 
-  Wire.setClock(50000); // 50kHz for long wire stability
+  Wire.setTimeout(50); 
+  Wire.setClock(100000);
   
   if (!bno08x_begin_and_enable()) {
     while (1) { delay(100); } // Hang if totally dead on boot
@@ -278,8 +275,8 @@ void runController(double dt) {
 }
 
 // ==========================================
-// 9. SERIAL INPUT (non-blocking: no readStringUntil timeout stalls)
-// ==========================================
+// 9. SERIAL INPUT
+// // ==========================================
 static void processSerialLine(char *line) {
   while (*line == ' ' || *line == '\t') line++;
   size_t len = strlen(line);
@@ -340,7 +337,7 @@ void handleSerialInput() {
 }
 
 // ==========================================
-// 10. TELEMETRY
+// 10. ENCODERS
 // ==========================================
 float readEncoder1() {
   long pos = enc1.read();
