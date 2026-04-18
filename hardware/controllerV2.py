@@ -337,7 +337,7 @@ def main():
         except (AttributeError, TypeError):
             pass # FIXED: Changed 'parse_args' to 'pass'
         
-        ort_session = ort.InferenceSession("cat_controller2.onnx")
+        ort_session = ort.InferenceSession("cat_controller.onnx")
         # Fetch the exact input name defined during your PyTorch export
         input_name = ort_session.get_inputs()[0].name 
 
