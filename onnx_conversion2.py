@@ -22,7 +22,7 @@ class StudentPolicy(nn.Module):
 # Update these dimensions to match your specific observation and action spaces
 STATE_DIM = 22
 ACTION_DIM = 3
-PTH_FILE = "student_policy_1776460509.893266.pth"
+PTH_FILE = "student_policy_1776547677.0429351.pth"
 ONNX_FILE = "cat_controller.onnx"
 
 def main():

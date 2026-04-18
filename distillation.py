@@ -90,7 +90,7 @@ def run_dagger():
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
-    expert = PPO.load("cat_controller_1776459043.2138839")
+    expert = PPO.load("cat_controller_1776547364.497379")
 
     # Initialize Student with restricted observation space
     student = StudentPolicy(student_obs_dim, act_dim)
