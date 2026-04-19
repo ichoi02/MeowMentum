@@ -10,7 +10,7 @@ import mujoco.viewer
 import cat_env
 
 class StudentPolicy(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_size=128):
+    def __init__(self, obs_dim, act_dim, hidden_size=256):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_size),
@@ -32,7 +32,7 @@ def get_student_obs(full_obs):
 def visualize():
     env = gym.make("Cat-v0")
 
-    agent = 'teacher'
+    agent = 'student'
     if agent == 'teacher':
         print("Loading teacher policy")
         teacher = PPO.load("cat_controller")
