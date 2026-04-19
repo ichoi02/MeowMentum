@@ -90,14 +90,14 @@ def run_dagger():
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
-    expert = PPO.load("cat_controller_notail")
+    expert = PPO.load("cat_controller")
 
     # Initialize Student with restricted observation space
     student = StudentPolicy(student_obs_dim, act_dim)
     optimizer = optim.Adam(student.parameters(), lr=1e-3)
     criterion = nn.MSELoss()
 
-    iterations = 100
+    iterations = 50
     steps_per_iter = 2000 
     batch_size = 32
     epochs_per_iter = 10

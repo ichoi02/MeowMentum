@@ -5,7 +5,7 @@
   </option>
 
   <default>
-    <joint limited="true" armature="0.000112" damping="0.0013" frictionloss="0.0077"/>
+    <joint limited="true" armature="0.001" damping="0.003" frictionloss="0.0077"/>
   </default>
 
   <asset>

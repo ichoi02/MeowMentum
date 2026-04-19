@@ -49,25 +49,38 @@ def main():
     dummy_input = torch.randn(1, STATE_DIM, requires_grad=True)
 
     # 5. Export to ONNX
-    print(f"Exporting model to {ONNX_FILE}...")
+    print(f"Exporting model to {ONNX_FILE} as opset 14...")
     torch.onnx.export(
-        model,                      # The instantiated PyTorch model
-        dummy_input,                # The dummy input tuple/tensor
-        ONNX_FILE,                  # Output file path
-        export_params=True,         # Store the trained parameter weights inside the model file
-        opset_version=11,           # Opset 11 is highly stable for most ONNX Runtime environments
-        do_constant_folding=True,   # Optimizes the graph by folding constants 
-        input_names=['state'],      # Define a clear input name for the C++/Python inference session
-        output_names=['action'],    # Define a clear output name
-        
-        # Optional: Define dynamic axes if you plan to pass variable batch sizes during inference.
-        # If your embedded controller strictly evaluates one state at a time, you can omit this.
+        model,                      
+        dummy_input,                
+        ONNX_FILE,                  
+        export_params=True,         
+        opset_version=14,           # CHANGED: Export to 14 to bypass PyTorch's broken downgrade
+        do_constant_folding=True,   
+        input_names=['state'],      
+        output_names=['action'],    
         dynamic_axes={
             'state': {0: 'batch_size'},    
             'action': {0: 'batch_size'}
         }
     )
-    print("Conversion complete!")
+    print("PyTorch export complete. Now patching opset metadata...")
+
+    # 6. Manually patch the Opset version down to 11
+    import onnx
+    
+    # Load the newly exported opset 14 model
+    onnx_model = onnx.load(ONNX_FILE)
+    
+    # Force the metadata to say opset 11
+    for imp in onnx_model.opset_import:
+        if imp.domain == "" or imp.domain == "ai.onnx":
+            imp.version = 11
+            
+    # Overwrite the file
+    onnx.save(onnx_model, ONNX_FILE)
+    
+    print(f"Success! {ONNX_FILE} has been safely patched to Opset 11.")
 
 if __name__ == "__main__":
     main()
