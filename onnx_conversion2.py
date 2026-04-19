@@ -24,7 +24,7 @@ class StudentPolicy(nn.Module):
 STATE_DIM = 22
 ACTION_DIM = 3
 PTH_FILE = "student_policy.pth"
-ONNX_FILE = f"cat_controller_{str(time.time())}.onnx"
+ONNX_FILE = f"cat_controller.onnx"
 
 def main():
     # 2. Instantiate the model and load the trained weights
