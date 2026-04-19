@@ -13,7 +13,7 @@ np.random.seed(None)
 # ---- train parameters ----
 w_pos = 1.0 
 w_sm = 0.1
-w_en = 0.1
+w_en = 10.0
 k = 0.1 # tanh gain param
 # --------------------------
 
@@ -116,10 +116,11 @@ class CatEnv(MujocoEnv, EzPickle):
         # self.ctrls.append(np.hstack([executed_action, self.data.qpos[7:]]))
         # self.ctrls.append(physical_torque)
         observation = self._get_obs()
-        reward = self._get_reward(action)
+        reward, reward_info = self._get_reward(action)
+        info = reward_info 
+        
         terminated = self._is_terminated()
         truncated = self._is_truncated()
-        info = {}
 
         self.prev_action = action
 
@@ -136,22 +137,22 @@ class CatEnv(MujocoEnv, EzPickle):
         self.prev_action = np.zeros_like(self.action_space.shape)
 
         # Domain randomization
-        # # Mass
-        # mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
-        # self.model.body_mass[:] = self.nominal_mass * mass_noise
+        # Mass
+        mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
+        self.model.body_mass[:] = self.nominal_mass * mass_noise
 
-        # # Joint Damping
-        # damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
-        # self.model.dof_damping[:] = self.nominal_damping * damping_noise
+        # Joint Damping
+        damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
+        self.model.dof_damping[:] = self.nominal_damping * damping_noise
 
-        # # COM position
-        # ipos_noise = np.random.uniform(-0.05, 0.05, size=self.nominal_ipos.shape)
-        # ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
-        # self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
+        # COM position
+        ipos_noise = np.random.uniform(-0.04, 0.04, size=self.nominal_ipos.shape)
+        ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
+        self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
 
-        # # Inertia tensor
-        # inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
-        # self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
+        # Inertia tensor
+        inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
+        self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
         self.action_delay = np.random.randint(0, 2)
@@ -166,7 +167,7 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # randomize initial orientation
         self.random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = 0#np.random.uniform(-np.pi/9, np.pi/9)
+        random_pitch = np.random.uniform(-np.pi/6, np.pi/6)
         random_yaw = np.random.uniform(-np.pi, np.pi)
 
         # Set initial rot/pos
@@ -222,16 +223,22 @@ class CatEnv(MujocoEnv, EzPickle):
         r_pos *= np.tanh(self.steps*k)
         
         delta = action - self.prev_action
-        r_sm = np.mean(delta**2)
+        r_sm = np.mean(delta**2) * w_sm
 
         ctrl = self.data.ctrl
-        r_en = np.mean(ctrl**2)
+        r_en = np.mean(ctrl**2) * w_en
 
-        penalty_factor = np.exp(-(w_sm * r_sm + w_en * r_en))
+        penalty_factor = np.exp(-(r_sm + r_en))
 
         final_reward = r_pos * penalty_factor
+        reward_info = {
+            "r_pos": r_pos,
+            "r_sm": r_sm,
+            "r_en": r_en,
+            "penalty_factor": penalty_factor
+        }
 
-        return final_reward
+        return final_reward, reward_info
     
     def _is_terminated(self):
         return False

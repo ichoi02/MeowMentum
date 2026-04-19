@@ -30,7 +30,7 @@ def get_noisy_student_obs(full_obs, rot_noise_std=0.01, joint_noise_std=0.02):
 
 # ---- 1. Define the Student Policy ----
 class StudentPolicy(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_size=64):
+    def __init__(self, obs_dim, act_dim, hidden_size=256):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_size),
@@ -90,7 +90,7 @@ def run_dagger():
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
-    expert = PPO.load("cat_controller_1776459043.2138839")
+    expert = PPO.load("cat_controller_notail")
 
     # Initialize Student with restricted observation space
     student = StudentPolicy(student_obs_dim, act_dim)
@@ -99,8 +99,8 @@ def run_dagger():
 
     iterations = 100
     steps_per_iter = 2000 
-    batch_size = 64
-    epochs_per_iter = 10   
+    batch_size = 32
+    epochs_per_iter = 10
 
     print("Iteration 0: Collecting initial expert data...")
     # Expert drives, Expert labels
