@@ -32,7 +32,7 @@ def get_student_obs(full_obs):
 def visualize():
     env = gym.make("Cat-v0")
 
-    agent = 'student'
+    agent = 'teacher'
     if agent == 'teacher':
         print("Loading teacher policy")
         teacher = PPO.load("cat_controller")

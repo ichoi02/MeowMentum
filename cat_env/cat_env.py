@@ -55,6 +55,8 @@ class CatEnv(MujocoEnv, EzPickle):
         self.nominal_damping = self.model.dof_damping.copy()
         self.nominal_ipos = self.model.body_ipos.copy()
         self.nominal_inertia = self.model.body_inertia.copy()
+        self.nominal_armature = self.model.dof_armature.copy()
+        self.nominal_frictionloss = self.model.dof_frictionloss.copy()
 
         # Initialize variables
         self.steps = 0
@@ -141,9 +143,13 @@ class CatEnv(MujocoEnv, EzPickle):
         mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
         self.model.body_mass[:] = self.nominal_mass * mass_noise
 
-        # Joint Damping
-        damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
+        # Joint
+        damping_noise = np.random.uniform(0.5, 1.5, size=self.nominal_damping.shape)
         self.model.dof_damping[:] = self.nominal_damping * damping_noise
+        armature_noise = np.random.uniform(0.5, 1.5, size=self.nominal_armature.shape)
+        self.model.dof_armature[:] = self.nominal_armature * armature_noise
+        friction_noise = np.random.uniform(0.5, 1.5, size=self.nominal_frictionloss.shape)
+        self.model.dof_frictionloss[:] = self.nominal_frictionloss * friction_noise
 
         # COM position
         ipos_noise = np.random.uniform(-0.04, 0.04, size=self.nominal_ipos.shape)
@@ -155,7 +161,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
-        self.action_delay = np.random.randint(0, 2)
+        self.action_delay = np.random.randint(0, 6)
         zero_action = np.zeros(self.action_space.shape)
         self.action_buffer = [zero_action.copy() for _ in range(self.action_delay)]
 
@@ -176,7 +182,7 @@ class CatEnv(MujocoEnv, EzPickle):
         qpos[3:7] = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
 
         self.set_state(qpos, qvel)
-
+        
         return self._get_obs()
 
     def _get_obs(self):
