@@ -45,39 +45,52 @@ class StudentPolicy(nn.Module):
         return self.net(x)
 
 # ---- 2. Data Collection Logic ----
-def collect_data(env, student_policy, expert_policy, num_steps, is_student_acting=False):
+def collect_data(env, student_policy, expert_policy, num_steps, is_student_acting=False, max_delay=2):
     """
-    Rolls out a policy. The expert uses the FULL observation. 
-    The student uses the PARTIAL observation.
+    Rolls out a policy. The expert uses the FULL CURRENT observation. 
+    The student uses the DELAYED NOISY observation.
     """
     student_states = []
     expert_actions = []
 
     full_obs, _ = env.reset()
     
+    # Initialize random delay and observation buffer for the first episode
+    obs_delay = np.random.randint(0, max_delay + 1)
+    obs_buffer = []
+
     for _ in range(num_steps):
         # 1. Extract what the student is allowed to see
         noisy_student_obs = get_noisy_student_obs(full_obs)
-        student_states.append(noisy_student_obs)
+        obs_buffer.append(noisy_student_obs)
 
-        # 2. The Privileged Expert gets the full observation to generate ground-truth labels
+        # 2. Retrieve the delayed observation from the buffer
+        if len(obs_buffer) > obs_delay:
+            delayed_student_obs = obs_buffer[-(obs_delay + 1)]
+        else:
+            delayed_student_obs = obs_buffer[0]
+        student_states.append(delayed_student_obs)
+
+        # 3. The Privileged Expert gets the full, current observation to generate ground-truth labels
         exp_action, _ = expert_policy.predict(full_obs, deterministic=True)
         expert_actions.append(exp_action)
 
-        # 3. Decide who drives the environment for this step
+        # 4. Decide who drives the environment for this step
         if is_student_acting:
             with torch.no_grad():
-                obs_tensor = torch.FloatTensor(noisy_student_obs).unsqueeze(0)
-                # The student predicts the action using quats and joint angles
+                obs_tensor = torch.FloatTensor(delayed_student_obs).unsqueeze(0)
                 act_action = student_policy(obs_tensor).squeeze(0).numpy()
         else:
             act_action = exp_action
 
-        # 4. Step the environment
+        # 5. Step the environment
         full_obs, _, terminated, truncated, _ = env.step(act_action)
 
+        # Handle environment resets mid-collection
         if terminated or truncated:
             full_obs, _ = env.reset()
+            obs_delay = np.random.randint(0, max_delay + 1)
+            obs_buffer = []
 
     return np.array(student_states), np.array(expert_actions)
 
@@ -100,7 +113,7 @@ def run_dagger():
     iterations = 50
     steps_per_iter = 2000 
     batch_size = 32
-    epochs_per_iter = 10
+    epochs_per_iter = 20
 
     print("Iteration 0: Collecting initial expert data...")
     # Expert drives, Expert labels

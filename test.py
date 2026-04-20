@@ -60,7 +60,7 @@ def visualize():
         viewer.cam.azimuth = 90
         viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD
 
-        slow = 1.0
+        slow = 0.3
 
         try:
             while viewer.is_running():
