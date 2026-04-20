@@ -362,8 +362,9 @@ def main():
         while(True):
             loop_start = time.time()
             front.update_sensor_data()
+            back.update_sensor_data()
             print(front.acc_mag)
-            if front.acc_mag < 3.0:
+            if front.acc_mag < 3.5:
                 print("Drop")
                 drop_started = time.time()
                 break
