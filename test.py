@@ -25,20 +25,20 @@ class StudentPolicy(nn.Module):
         return self.net(x)
 
 def get_student_obs(full_obs):
-    quats = full_obs[0:18]
+    quats = full_obs[0:9] #FIXME
     joint_angles = full_obs[18+7:18+7+4]
     return np.concatenate([quats, joint_angles])
 
 def visualize():
     env = gym.make("Cat-v0")
 
-    agent = 'teacher'
+    agent = 'student'
     if agent == 'teacher':
         print("Loading teacher policy")
         teacher = PPO.load("cat_controller")
     elif agent =='student':
         print("Loading student policy")
-        student_obs_dim = 22
+        student_obs_dim = 13
         act_dim = env.action_space.shape[0]
         student = StudentPolicy(student_obs_dim, act_dim)
         student.load_state_dict(torch.load("student_policy.pth"))

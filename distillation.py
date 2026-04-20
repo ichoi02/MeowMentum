@@ -19,7 +19,7 @@ print(f"Using device: {device}")
 
 def get_noisy_student_obs(full_obs, rot_noise_std=0.01, joint_noise_std=0.02):
     # Extract clean data
-    rots = full_obs[0:18].copy() # two 9D rotation matrices
+    rots = full_obs[0:9].copy() # two 9D rotation matrices FIXME
     joint_angles = full_obs[18+7:18+7+4].copy() # qpos[7:]
 
     # Apply noise using your env_util function
@@ -99,7 +99,7 @@ def run_dagger():
     env = gym.make("Cat-v0")
     
     # 18 for rotation matrix + 4 for joint angles = 22 total dimensions
-    student_obs_dim = 22
+    student_obs_dim = 13
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
