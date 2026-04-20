@@ -40,9 +40,9 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains
 double Kp1 = 2048.0;
-double Kd1 = 204.8;
+double Kd1 = 20.48;
 double Kp2 = 20480.0;
-double Kd2 = 2048.0;
+double Kd2 = 204.80;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;

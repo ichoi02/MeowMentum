@@ -53,15 +53,15 @@ SN_BACK  = "18452630"
 BAUD_RATE = 115200
 LOOP_HZ = 50
 
-CONTROL_DURATION = 0.8
+CONTROL_DURATION = 0.7
 
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
 # Teleplot
-UDP_IP = "127.0.0.1" 
-UDP_PORT = 47269
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# UDP_IP = "127.0.0.1" 
+# UDP_PORT = 47269
+# sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 def _open_teensy_serial(port_path: str) -> serial.Serial:
     # write_timeout=0: do not block indefinitely if USB TX is wedged (pair with non-blocking Teensy TX).
@@ -363,11 +363,14 @@ def main():
             loop_start = time.time()
             front.update_sensor_data()
             back.update_sensor_data()
-            print(front.acc_mag)
+            # print(front.acc_mag)
             if front.acc_mag < 3.5:
                 print("Drop")
                 drop_started = time.time()
                 break
+
+            r_front = R.from_quat(front.quat, scalar_first=True)
+            print(r_front.as_euler('xyz', degrees=True))
             
             elapsed = time.time() - loop_start
             if elapsed < loop_period:
@@ -397,7 +400,7 @@ def main():
                 joints = np.array([front.m1_rad, front.m2_rad, back.m2_rad, back.m1_rad])
                 
                 # Stack to create a flat 1D array
-                obs = np.hstack((front_rot, back_rot, joints))
+                obs = np.hstack((front_rot, joints)) #FIXME
                 
                 # Cast to float32 and add the batch dimension (1, N) for ONNX
                 obs_tensor = np.array(obs, dtype=np.float32).reshape(1, -1)
@@ -411,7 +414,7 @@ def main():
                 tail = util.map_value(float(raw_action[2]), -1, 1, -np.pi/2, np.pi/2) # tail
 
                 action = [roll, pitch, tail, -roll]
-                print(action)
+                # print(action)
 
             front.set_motors(action[0], action[1])
             back.set_motors(action[2], action[3])
@@ -429,22 +432,22 @@ def main():
             ])
 
             # Teleplot format: "VariableName:Value\n"
-            teleplot_data = [
-                f"front_w:{front.quat[0]}", f"front_x:{front.quat[1]}", f"front_y:{front.quat[2]}", f"front_z:{front.quat[3]}",
-                f"front_m1:{front.m1_rad}", f"front_m2:{front.m2_rad}",
-                f"front_acc:{front.acc_mag}",
-                f"action_0:{action[0]}", f"action_1:{action[1]}",
-                f"back_w:{back.quat[0]}", f"back_x:{back.quat[1]}", f"back_y:{back.quat[2]}", f"back_z:{back.quat[3]}",
-                f"back_m1:{back.m1_rad}", f"back_m2:{back.m2_rad}",
-                f"back_acc:{back.acc_mag}",
-                f"action_2:{action[2]}", f"action_3:{action[3]}"
-            ]
+            # teleplot_data = [
+            #     f"front_w:{front.quat[0]}", f"front_x:{front.quat[1]}", f"front_y:{front.quat[2]}", f"front_z:{front.quat[3]}",
+            #     f"front_m1:{front.m1_rad}", f"front_m2:{front.m2_rad}",
+            #     f"front_acc:{front.acc_mag}",
+            #     f"action_0:{action[0]}", f"action_1:{action[1]}",
+            #     f"back_w:{back.quat[0]}", f"back_x:{back.quat[1]}", f"back_y:{back.quat[2]}", f"back_z:{back.quat[3]}",
+            #     f"back_m1:{back.m1_rad}", f"back_m2:{back.m2_rad}",
+            #     f"back_acc:{back.acc_mag}",
+            #     f"action_2:{action[2]}", f"action_3:{action[3]}"
+            # ]
 
             # Join with newlines and add the final newline
-            teleplot_string = "\n".join(teleplot_data) + "\n"
+            # teleplot_string = "\n".join(teleplot_data) + "\n"
 
             # Send the data via your UDP socket
-            sock.sendto(teleplot_string.encode(), (UDP_IP, UDP_PORT))
+            # sock.sendto(teleplot_string.encode(), (UDP_IP, UDP_PORT))
 
             # Enforce timing
             elapsed = time.time() - loop_start
