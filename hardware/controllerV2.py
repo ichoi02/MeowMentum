@@ -376,6 +376,7 @@ def main():
 
     print(f"Starting loop at {LOOP_HZ}Hz. Press Ctrl+C to quit.")
 
+    padding = 10
     try:
         while(True): 
             loop_start = time.time()
@@ -412,9 +413,6 @@ def main():
                 action = [roll, pitch, tail, -roll]
                 print(action)
 
-            front.set_motors(action[0], action[1])
-            back.set_motors(action[2], action[3])
-
             log.append([
                 round(t, 4),
                 front.quat[0], front.quat[1], front.quat[2], front.quat[3],
@@ -426,6 +424,9 @@ def main():
                 back.acc_mag,
                 action[2], action[3],
             ])
+
+            front.set_motors(action[0], action[1])
+            back.set_motors(action[2], action[3])
 
             # Teleplot format: "VariableName:Value\n"
             teleplot_data = [
@@ -453,6 +454,11 @@ def main():
                 print(f"WARNING: Loop missed deadline! Took {elapsed:.4f}s")
                 
             if time.time() - drop_started > CONTROL_DURATION:
+                front.stop_all_motors()
+                back.stop_all_motors()
+                padding -= 1
+
+            if padding <= 0:
                 raise KeyboardInterrupt
 
     except KeyboardInterrupt:
