@@ -15,8 +15,11 @@ import matplotlib.colors as mcolors
 import matplotlib.path as mpath
 import matplotlib.lines as mlines
 
-REPORT_PATH = './data_analysis/report.csv'
-OUT_PATH    = './data_analysis/performance_scatter.png'
+from pdb import set_trace as st
+
+MODEL_BASED = '_mbc'
+REPORT_PATH = f'./data_analysis/report{MODEL_BASED}.csv'
+OUT_PATH    = f'./data_analysis/performance_scatter{MODEL_BASED}.png'
 
 # ---------- 1. Data Loading / Mock Data Generator ----------
 if os.path.exists(REPORT_PATH):
@@ -66,56 +69,64 @@ SHAPE_PATHS = create_half_paths()
 # ---------- 3. Normalization and Colormaps ----------
 cmap_roll = plt.cm.Reds
 cmap_rate = plt.cm.Blues
-norm_roll = mcolors.Normalize(vmin=0, vmax=90)
 
-max_rollrate = report['F_rollrate_2p5m'].abs().max()
-if pd.isna(max_rollrate) or max_rollrate == 0:
-    max_rollrate = 100 
+max_init_roll = report['F_roll_initial'].abs().max()
+if pd.isna(max_init_roll) or max_init_roll == 0:
+    max_init_roll = 180
 
-norm_rate = mcolors.Normalize(vmin=0, vmax=max_rollrate)
+max_init_rate = report['F_rollrate_initial'].abs().max()
+if pd.isna(max_init_rate) or max_init_rate == 0:
+    max_init_rate = 100
+
+norm_roll = mcolors.Normalize(vmin=0, vmax=max_init_roll)
+norm_rate = mcolors.Normalize(vmin=0, vmax=max_init_rate)
 
 # ---------- 4. Plot Initialization ----------
-MARKER_SIZE = 700 
-fig, ax = plt.subplots(figsize=(14, 8)) 
+MARKER_SIZE = 700
+fig, ax = plt.subplots(figsize=(14, 8))
 
-texts = [] 
+texts = []
 
 for _, row in report.iterrows():
-    x = abs(row['F_roll_initial'])
-    y = abs(row['F_rollrate_initial'])
-    
-    c_roll = cmap_roll(norm_roll(abs(row['F_roll_2p5m'])))
-    c_rate = cmap_rate(norm_rate(abs(row['F_rollrate_2p5m'])))
+    # Axes = performance (final state); ideal is bottom-left (0, 0)
+    x = abs(row['F_roll_2p5m'])
+    y = abs(row['F_rollrate_2p5m'])
+
+    # Color halves = initial conditions
+    c_roll = cmap_roll(norm_roll(abs(row['F_roll_initial'])))
+    c_rate = cmap_rate(norm_rate(abs(row['F_rollrate_initial'])))
     trial = row['trial']
 
-    left_path = SHAPE_PATHS[trial]['left']
+    left_path  = SHAPE_PATHS[trial]['left']
     right_path = SHAPE_PATHS[trial]['right']
     edge_marker = SHAPE_PATHS[trial]['edge']
 
-    # Draw halves
-    ax.scatter(x, y, c=[c_roll], s=MARKER_SIZE, marker=left_path, linewidths=0, zorder=4, alpha=0.9)
+    if x > 180:
+        x -= 360
+
+    ax.scatter(x, y, c=[c_roll], s=MARKER_SIZE, marker=left_path,  linewidths=0, zorder=4, alpha=0.9)
     ax.scatter(x, y, c=[c_rate], s=MARKER_SIZE, marker=right_path, linewidths=0, zorder=4, alpha=0.9)
+    ax.scatter(x, y, c='none',   s=MARKER_SIZE, marker=edge_marker,
+               edgecolors='#333333', linewidths=1.5, zorder=5)
 
-    # Draw outer ring
-    ax.scatter(x, y, c='none', s=MARKER_SIZE, marker=edge_marker, edgecolors='#333333', linewidths=1.5, zorder=5)
-
-    # Collect text annotations
     texts.append(ax.text(x, y, f"{trial}-{row['rep']}", fontsize=9, color='#222222', zorder=6))
 
-# ---------- 5. Axes & Styling (FIXED LIMITS) ----------
-ax.set_xlabel('|Initial roll angle| (deg)', fontsize=13, fontweight='medium')
-ax.set_ylabel('|Initial roll rate| (deg/s)', fontsize=13, fontweight='medium')
-ax.set_title('Righting Performance vs Initial Conditions', fontsize=16, fontweight='bold', pad=25)
+# ---------- 5. Axes & Styling ----------
+ax.set_xlabel('|Final roll angle| at 2.5 m (deg)',   fontsize=13, fontweight='medium')
+ax.set_ylabel('|Final roll rate|  at 2.5 m (deg/s)', fontsize=13, fontweight='medium')
+ax.set_title('Righting Performance  —  ideal point is (0, 0)',
+             fontsize=16, fontweight='bold', pad=25)
 
-# Fix: Calculate limits based on the absolute values actually being plotted
-abs_x = report['F_roll_initial'].abs()
-abs_y = report['F_rollrate_initial'].abs()
+# Star at the ideal (0, 0) point
+ax.scatter(0, 0, marker='*', s=400, color='gold', edgecolors='#888800',
+           linewidths=1, zorder=6, label='Ideal')
 
-x_margin = (abs_x.max() - abs_x.min()) * 0.1
-y_margin = (abs_y.max() - abs_y.min()) * 0.1
-
-ax.set_xlim(left=max(0, abs_x.min() - x_margin), right=abs_x.max() + x_margin)
-ax.set_ylim(bottom=max(0, abs_y.min() - y_margin), top=abs_y.max() + y_margin)
+abs_x = report['F_roll_2p5m'].abs()
+abs_y = report['F_rollrate_2p5m'].abs()
+x_margin = abs_x.max() * 0.12
+y_margin = abs_y.max() * 0.12
+ax.set_xlim(left=-180, right=180)
+ax.set_ylim(bottom=-y_margin, top=abs_y.max() + y_margin)
 
 ax.grid(True, linestyle='--', alpha=0.4, zorder=0)
 ax.spines['top'].set_visible(False)
@@ -125,15 +136,12 @@ ax.spines['right'].set_visible(False)
 sm_roll = plt.cm.ScalarMappable(cmap=cmap_roll, norm=norm_roll)
 sm_rate = plt.cm.ScalarMappable(cmap=cmap_rate, norm=norm_rate)
 
-# LEFT Colorbar (Red - Roll Angle)
 cb_left = plt.colorbar(sm_roll, ax=ax, location='left', pad=0.10, fraction=0.04)
-cb_left.set_label('Left Half (Red): |Final roll angle| (deg)', fontsize=11)
-cb_left.set_ticks([0, 30, 60, 90])
+cb_left.set_label('Left Half (Red): |Initial roll angle| (deg)', fontsize=11)
 cb_left.outline.set_visible(False)
 
-# RIGHT Colorbar (Blue - Roll Rate)
 cb_right = plt.colorbar(sm_rate, ax=ax, location='right', pad=0.04, fraction=0.04)
-cb_right.set_label('Right Half (Blue): |Final roll rate| (deg/s)', fontsize=11)
+cb_right.set_label('Right Half (Blue): |Initial roll rate| (deg/s)', fontsize=11)
 cb_right.outline.set_visible(False)
 
 # Shape legend

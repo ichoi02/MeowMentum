@@ -8,8 +8,9 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from matplotlib.animation import FuncAnimation
 
 DATA_DIR = './telemetry'
-PLOT_DIR = './data_analysis/plots'
-REPORT_PATH = './data_analysis/report.csv'
+PLOT_DIR = './data_analysis/plots_mbc'
+REPORT_PATH = './data_analysis/report_mbc.csv'
+MODEL_BASED = 'mbc_'
 
 def load_data(file_path):
     """
@@ -82,11 +83,11 @@ def low_pass_filter(data, cutoff_freq, fs):
 
 records = []
 
-for date in ['Apr20']:
+for date in ['Apr21']:
     for trial in ['r45', 'r90', 'r180']:
         for rep in [1,2,3,4,5]:
             for file_name in os.listdir(DATA_DIR):
-                if file_name.startswith(f"{date}_{trial}_{rep}"):
+                if file_name.startswith(f"{date}_{MODEL_BASED}{trial}_{rep}"):
                     print(f"Loading data from {file_name}...")
                     df = load_data(f"{DATA_DIR}/{file_name}")
                     break
