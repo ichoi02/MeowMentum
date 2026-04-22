@@ -362,7 +362,10 @@ def main():
         while(True):
             loop_start = time.time()
             front.update_sensor_data()
-            print(front.acc_mag)
+            r = R.from_quat(front.quat, scalar_first=True)
+            euler = r.as_euler(seq='xyz', degrees=True)
+            print(f"roll: {euler[0]}, pitch: {euler[1]}, yaw: {euler[2]}")
+
             if front.acc_mag < 3.0:
                 print("Drop")
                 drop_started = time.time()

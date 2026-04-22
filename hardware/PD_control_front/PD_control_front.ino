@@ -40,7 +40,7 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains
 double Kp1 = 2048.0;
-double Kd1 = 20.48;
+double Kd1 = 204.8;
 double Kp2 = 20480.0;
 double Kd2 = 204.8;
 

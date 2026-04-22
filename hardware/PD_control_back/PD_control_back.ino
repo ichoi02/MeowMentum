@@ -42,7 +42,7 @@ bool ENCODER2_REVERSED = true;
 double Kp1 = 1024.0;
 double Kd1 = 10.24;
 double Kp2 = 1024.0;
-double Kd2 = 10.24;
+double Kd2 = 102.4;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;
