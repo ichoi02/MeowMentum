@@ -165,8 +165,8 @@ class CatEnv(MujocoEnv, EzPickle):
         qvel = self.init_qvel.copy()
 
         # randomize initial orientation
-        self.random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = 0#np.random.uniform(-np.pi/9, np.pi/9)
+        self.random_roll = np.random.uniform(np.pi - np.pi/10, np.pi + np.pi/10) #np.random.uniform(-np.pi, np.pi)
+        random_pitch = np.random.uniform(-np.pi/10, np.pi/10)
         random_yaw = np.random.uniform(-np.pi, np.pi)
 
         # Set initial rot/pos

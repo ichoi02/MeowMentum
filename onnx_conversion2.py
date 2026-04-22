@@ -22,8 +22,8 @@ class StudentPolicy(nn.Module):
 # Update these dimensions to match your specific observation and action spaces
 STATE_DIM = 22
 ACTION_DIM = 3
-PTH_FILE = "student_policy_1776460509.893266.pth"
-ONNX_FILE = "cat_controller.onnx"
+PTH_FILE = "student_policy_1776899439.223155.pth"
+ONNX_FILE = "cat_controller_pitch.onnx"
 
 def main():
     # 2. Instantiate the model and load the trained weights

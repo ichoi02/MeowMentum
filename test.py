@@ -31,7 +31,7 @@ def get_student_obs(full_obs):
 
 def visualize():
     env = gym.make("Cat-v0")
-    model_path = "cat_controller"
+    model_path = "cat_controller_1776898677.935773"
 
     agent = 'student'
     if agent == 'teacher':
@@ -42,7 +42,7 @@ def visualize():
         student_obs_dim = 22
         act_dim = env.action_space.shape[0]
         student = StudentPolicy(student_obs_dim, act_dim)
-        student.load_state_dict(torch.load("student_policy.pth"))
+        student.load_state_dict(torch.load("student_policy_1776899439.223155.pth"))
 
     obs, _ = env.reset()
     
