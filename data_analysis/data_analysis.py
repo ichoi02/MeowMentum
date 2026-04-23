@@ -11,6 +11,9 @@ DATA_DIR = './telemetry'
 PLOT_DIR = './data_analysis/plots'
 REPORT_PATH = './data_analysis/report.csv'
 
+MUJOCO_PLAYBACK = False
+
+
 def load_data(file_path):
     """
     Load data from a CSV file.
@@ -85,31 +88,37 @@ records = []
 for date in ['Apr20']:
     for trial in ['r45', 'r90', 'r180']:
         for rep in [1,2,3,4,5]:
-            for file_name in os.listdir(DATA_DIR):
-                if file_name.startswith(f"{date}_{trial}_{rep}"):
-                    print(f"Loading data from {file_name}...")
-                    df = load_data(f"{DATA_DIR}/{file_name}")
-                    break
-            else:
-                raise FileNotFoundError(f"No file found for {date} {trial} {rep}")
+            if date == 'Apr20' and trial == 'r180' and rep == 4:
+                print(f"SKIPPING {date} {trial} rep{rep} due to hardware issue during the experiment")
+                continue
+            for morphology in ['spine+tail', 'spine-only']:
+                for file_name in os.listdir(f'{DATA_DIR}/{morphology}'):
+                    if file_name.endswith(f"{trial}_{rep}.csv"):
+                        print(f"Loading data from {file_name}...")
+                        df = load_data(f"{DATA_DIR}/{morphology}/{file_name}")
+                        break
+                else:
+                    raise FileNotFoundError(f"No file found for {date} {trial} {rep}")
 
             #%% Determining the start and end of the fall
             # Fall detection (to determine the duration of the fall)
             index_at_impact, which_body = impact_detector(df[['F_ACC', 'B_ACC']].to_numpy())
             time_at_impact = df['Time'].iloc[index_at_impact]
-            time_at_initialease = df['Time'].iloc[0]
-            # duration = time_at_impact - time_at_initialease
-            duration = 0.7
+            time_at_initial = df['Time'].iloc[0]
+            duration = time_at_impact - time_at_initial
+            if duration < 0.7: # impact occurs during actuation
+                print(f"  SKIPPED: fall duration too short ({duration:.2f} s < 0.7 s)")
+                continue
             fall_distance = 9.81 / 2 * duration**2
-            # print(f"fall distance: {fall_distance:.2f} m, duration: {duration:.2f} s")
-            # if fall_distance <= 2.5:
-            #     print(f"  SKIPPED: fall distance too short ({fall_distance:.2f} m < 2.5 m)")
-            #     continue
+            
+            if fall_distance <= 2.5:
+                print(f"  SKIPPED: fall distance too short ({fall_distance:.2f} m < 2.5 m)")
+                continue
 
-            time_at_2p5m = np.sqrt(2 * fall_distance / 9.81) + time_at_initialease
+            time_at_2p5m = np.sqrt(2 * 2.5 / 9.81) + time_at_initial
 
-            end_idx = np.argmin(np.abs(df['Time'] - time_at_2p5m)) + 1 # add one padding frame after actuation
-            start = time_at_initialease; end = time_at_2p5m
+            end_idx = np.argmin(np.abs(df['Time'] - time_at_2p5m))
+            start = time_at_initial; end = time_at_2p5m
             time = df['Time'].iloc[0:end_idx].to_numpy()
             
 
@@ -125,18 +134,21 @@ for date in ['Apr20']:
             f_ori  = f_rot.as_euler('xyz', degrees=True)
             b_ori  = b_rots.as_euler('xyz', degrees=True)
 
-            f_ori = np.unwrap(np.radians(f_ori), axis=0, discont=np.pi)  # unwrap to prevent discontinuities
-            f_ori = np.degrees(f_ori)  # convert back to degrees after unwrapping
-            b_ori = np.unwrap(np.radians(b_ori), axis=0, discont=np.pi)
-            b_ori = np.degrees(b_ori)
-
             # FK-based rear orientation: front_IMU * rot1(F_M1, x) * pitch(F_M2, y) * rot2(B_M2, x)
             _zeros  = np.zeros(end_idx)
             r_rot1  = R.from_rotvec(np.column_stack([df['F_M1'].iloc[0:end_idx].to_numpy(), _zeros, _zeros]))
             r_pitch = R.from_rotvec(np.column_stack([_zeros, df['F_M2'].iloc[0:end_idx].to_numpy(), _zeros]))
             r_rot2  = R.from_rotvec(np.column_stack([df['B_M2'].iloc[0:end_idx].to_numpy(), _zeros, _zeros]))
             fk_rots = f_rot * r_rot1 * r_pitch * r_rot2
+
+
+            f_ori = np.unwrap(np.radians(f_ori), axis=0, discont=np.pi)  # unwrap to prevent discontinuities
+            f_ori = np.degrees(f_ori)  # convert back to degrees after unwrapping
+            b_ori = np.unwrap(np.radians(b_ori), axis=0, discont=np.pi)
+            b_ori = np.degrees(b_ori)
             fk_ori  = fk_rots.as_euler('xyz', degrees=True)
+            fk_rot = np.unwrap(np.radians(fk_ori), axis=0, discont=np.pi)
+            fk_ori = np.degrees(fk_rot)
 
 
             #%% Checking the performance
@@ -152,31 +164,6 @@ for date in ['Apr20']:
             1. Check the orientation at release; was it close to the desired orientation?
             2. Check the angular velocity at release; was it close to zero?
             '''
-
-
-            def check_imu_initialiability(angvel, label):
-                roll_rate = angvel[:, 0]
-                MOONSHOT  = 2000  # deg/s — physically implausible in a single frame
-                SLOPE     = 500   # deg/s — threshold for "sustained high" rate
-
-                issues = []
-                moonshot_frames = np.where(np.abs(roll_rate) > MOONSHOT)[0]
-                if len(moonshot_frames):
-                    issues.append(f"moonshot: {len(moonshot_frames)} frame(s) |rate| > {MOONSHOT} deg/s "
-                                f"(max {np.abs(roll_rate).max():.0f} deg/s at frame {moonshot_frames[0]})")
-
-                jitter = np.std(np.diff(roll_rate))  # std of acceleration = jitter proxy
-                if jitter > 300:
-                    issues.append(f"jitter: roll-rate std-of-diff = {jitter:.0f} deg/s²")
-
-                high_slope_frac = np.mean(np.abs(roll_rate) > SLOPE)
-                if high_slope_frac > 0.3:
-                    issues.append(f"high slope: {high_slope_frac*100:.0f}% of frames |rate| > {SLOPE} deg/s")
-
-                status = "UNRELIABLE ⚠" if issues else "OK ✓"
-                print(f"  {label}: {status}")
-                for iss in issues:
-                    print(f"    ! {iss}")
 
             # Angular velocity (deg/s) — quaternion finite differences, singularity-free
             dt = np.diff(time)
@@ -227,12 +214,9 @@ for date in ['Apr20']:
             print(f"B  IMU  angular vel  [roll, pitch, yaw] (deg/s): {b_angvel[0].round(1)}")
             print(f"FK rear angular vel  [roll, pitch, yaw] (deg/s): {fk_angvel[0].round(1)}")
 
-            print("\n=== B IMU Reliability ===")
-            check_imu_initialiability(b_angvel, "B IMU roll")
-
             # Collect metrics for report
             records.append({
-                'date': date, 'trial': trial, 'rep': rep,
+                'date': date, 'trial': trial, 'rep': rep, 'morphology': morphology,
                 # --- at 2.5 m ---
                 'F_roll_2p5m':      round(f_ori[-1, 0], 2),
                 'B_roll_2p5m':      round(fk_ori[-1, 0], 2),
@@ -243,18 +227,30 @@ for date in ['Apr20']:
                 'B_roll_initial':       round(fk_ori[0, 0], 2),
                 'F_rollrate_initial':   round(f_angvel[0, 0], 2),
                 'B_rollrate_initial':   round(fk_angvel[0, 0], 2),
+
+                # --- at 2.5 m ---
+                'F_pitch_2p5m':      round(f_ori[-1, 1], 2),
+                'B_pitch_2p5m':      round(fk_ori[-1, 1], 2),
+                'F_pitchrate_2p5m':  round(f_angvel[-1, 1], 2),
+                'B_pitchrate_2p5m':  round(fk_angvel[-1, 1], 2),
+                # --- at release (sanity checks) ---
+                'F_pitch_initial':       round(f_ori[0, 1], 2),
+                'B_pitch_initial':       round(fk_ori[0, 1], 2),
+                'F_pitchrate_initial':   round(f_angvel[0, 1], 2),
+                'B_pitchrate_initial':   round(fk_angvel[0, 1], 2),
             })
 
             #%% MuJoCo playback (FK + rear IMU ghost) — runs via mjpython subprocess
-            import subprocess
-            playback_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mujoco_playback.py')
-            video_path = os.path.join(PLOT_DIR, date, trial, f'rep{rep}_playback.mp4')
-            subprocess.Popen([
-                'mjpython', playback_script,
-                '--file', f'{DATA_DIR}/{file_name}',
-                '--end_idx', str(end_idx),
-                '--save_video', video_path,
-            ])
+            if MUJOCO_PLAYBACK:
+                import subprocess
+                playback_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mujoco_playback.py')
+                video_path = os.path.join(PLOT_DIR, date, trial, f'rep{rep}_playback.mp4')
+                subprocess.Popen([
+                    'mjpython', playback_script,
+                    '--file', f'{DATA_DIR}/{file_name}',
+                    '--end_idx', str(end_idx),
+                    '--save_video', video_path,
+                ])
 
 report_df = pd.DataFrame(records)
 report_df.to_csv(REPORT_PATH, index=False)

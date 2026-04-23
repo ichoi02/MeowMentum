@@ -17,26 +17,16 @@ import matplotlib.lines as mlines
 
 from pdb import set_trace as st
 
-MODEL_BASED = '_mbc'
-REPORT_PATH = f'./data_analysis/report{MODEL_BASED}.csv'
-OUT_PATH    = f'./data_analysis/performance_scatter{MODEL_BASED}.png'
+MORPHOLOGY = 'spine-only'
 
-# ---------- 1. Data Loading / Mock Data Generator ----------
-if os.path.exists(REPORT_PATH):
-    report = pd.read_csv(REPORT_PATH)
-else:
-    print(f"Warning: {REPORT_PATH} not found. Generating mock data for demonstration.")
-    np.random.seed(42)
-    n_samples = 15
-    report = pd.DataFrame({
-        'trial': np.random.choice(['r45', 'r90', 'r180'], n_samples),
-        'rep': np.arange(1, n_samples + 1),
-        'F_roll_initial': np.random.uniform(-180, 180, n_samples), # Testing negatives
-        'F_rollrate_initial': np.random.uniform(-120, 120, n_samples),
-        'F_roll_2p5m': np.random.uniform(-90, 90, n_samples),
-        'F_rollrate_2p5m': np.random.uniform(-200, 200, n_samples)
-    })
-    os.makedirs('./data_analysis', exist_ok=True)
+
+MODEL_BASED = '' # '_mbc'
+REPORT_PATH = f'./data_analysis/report{MODEL_BASED}.csv'
+OUT_PATH    = f'./data_analysis/performance_scatter{MODEL_BASED}_{MORPHOLOGY}.png'
+
+
+report = pd.read_csv(REPORT_PATH)
+report = report[report['morphology'] == MORPHOLOGY]
 
 # ---------- 2. Custom Left/Right Path Generators ----------
 def create_half_paths():
