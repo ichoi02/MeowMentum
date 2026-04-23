@@ -136,22 +136,22 @@ class CatEnv(MujocoEnv, EzPickle):
         self.prev_action = np.zeros_like(self.action_space.shape)
 
         # Domain randomization
-        # # Mass
-        # mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
-        # self.model.body_mass[:] = self.nominal_mass * mass_noise
+        # Mass
+        mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
+        self.model.body_mass[:] = self.nominal_mass * mass_noise
 
-        # # Joint Damping
-        # damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
-        # self.model.dof_damping[:] = self.nominal_damping * damping_noise
+        # Joint Damping
+        damping_noise = np.random.uniform(0.6, 1.4, size=self.nominal_damping.shape)
+        self.model.dof_damping[:] = self.nominal_damping * damping_noise
 
-        # # COM position
-        # ipos_noise = np.random.uniform(-0.05, 0.05, size=self.nominal_ipos.shape)
-        # ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
-        # self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
+        # COM position
+        ipos_noise = np.random.uniform(-0.05, 0.05, size=self.nominal_ipos.shape)
+        ipos_noise[0] = 0.0  # Crucial: Do not move the world body (index 0)
+        self.model.body_ipos[:] = self.nominal_ipos + ipos_noise
 
-        # # Inertia tensor
-        # inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
-        # self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
+        # Inertia tensor
+        inertia_noise = np.random.uniform(0.8, 1.2, size=self.nominal_inertia.shape)
+        self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
         self.action_delay = np.random.randint(0, 2)
