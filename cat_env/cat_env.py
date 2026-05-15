@@ -23,7 +23,7 @@ class CatEnv(MujocoEnv, EzPickle):
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
         
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(50,), dtype=np.float64)
+        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(56,), dtype=np.float64)
         action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float64)
 
         MujocoEnv.__init__(
@@ -65,9 +65,9 @@ class CatEnv(MujocoEnv, EzPickle):
 
         self.pd = []
         self.pd.append(util.PDController(2.0, 0.2))
-        self.pd.append(util.PDController(20.0, 2.0))
+        self.pd.append(util.PDController(20.0, 0.2))
         self.pd.append(util.PDController(1.0, 0.1))
-        self.pd.append(util.PDController(1.0, 0.1))
+        self.pd.append(util.PDController(1.0, 0.01))
 
         self.ctrls = []
 
@@ -173,40 +173,59 @@ class CatEnv(MujocoEnv, EzPickle):
         qvel = self.init_qvel.copy()
 
         # randomize initial orientation
-        self.random_roll = np.pi#np.random.uniform(-np.pi, np.pi)
+        random_roll = np.random.uniform(-np.pi, np.pi)
         random_pitch = np.random.uniform(-np.pi/6, np.pi/6)
         random_yaw = np.random.uniform(-np.pi, np.pi)
 
-        # Set initial rot/pos
-        r = R.from_euler("xyz", [self.random_roll, random_pitch, random_yaw], degrees=False)
+        # TODO: randomize initial angular velocity
+        random_roll_rate = 0#np.random.uniform(-6, 6)
+        random_pitch_rate = 0
+        random_yaw_rate = 0
+
+        # Set initial states
+        r = R.from_euler("xyz", [random_roll, random_pitch, random_yaw], degrees=False)
         quat_xyzw = r.as_quat()
         qpos[3:7] = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
+        qvel[3:6] = [random_roll_rate, random_pitch_rate, random_yaw_rate]
 
         self.set_state(qpos, qvel)
         
         return self._get_obs()
 
     def _get_obs(self):
+        # Position
         front_body_pos = self.data.xpos[self._body_idx["front_body"]]
         rear_body_pos = self.data.xpos[self._body_idx["rear_body"]]
 
+        # Rotation matrix
         front_body_rot = util.to_rotation_matrix(self.data.xquat[self._body_idx["front_body"]])
         rear_body_rot = util.to_rotation_matrix(self.data.xquat[self._body_idx["rear_body"]])
 
+        # Gyro
+        front_vel = np.zeros(6)
+        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_BODY, self._body_idx["front_body"], front_vel, 1)
+        front_gyro = front_vel[:3]
+        rear_vel = np.zeros(6)
+        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_BODY, self._body_idx["rear_body"], rear_vel, 1)
+        rear_gyro = rear_vel[:3]
+
+        # Joint positions
         qpos = self.data.qpos
         qvel = self.data.qvel
 
+        # Control signal
         ctrl = self.data.ctrl
         step = np.array([self.steps / self.max_steps])
-        
+
         obs = np.concatenate([
             front_body_rot, rear_body_rot,
+            front_gyro, rear_gyro,
             qpos, qvel,
             front_body_pos, rear_body_pos,
             ctrl, step
         ])
         return obs
-
+    
     def _get_reward(self, action):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]

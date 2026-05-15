@@ -20,13 +20,15 @@ print(f"Using device: {device}")
 def get_noisy_student_obs(full_obs, rot_noise_std=0.01, joint_noise_std=0.02):
     # Extract clean data
     rots = full_obs[0:9].copy() # two 9D rotation matrices FIXME
-    joint_angles = full_obs[18+7:18+7+4].copy() # qpos[7:]
+    gyros = full_obs[18:21].copy()
+    joint_angles = full_obs[18+6+7:18+6+7+4].copy() # qpos[7:]
 
     # Apply noise using your env_util function
     noisy_rots = util.add_rotational_noise(rots, rot_noise_std)
+    noisy_gyros = util.add_gaussian_noise(gyros, rot_noise_std)
     noisy_joints = util.add_gaussian_noise(joint_angles, joint_noise_std)
 
-    return np.concatenate([noisy_rots, noisy_joints])
+    return np.concatenate([noisy_rots, noisy_gyros, noisy_joints])
 
 # ---- 1. Define the Student Policy ----
 class StudentPolicy(nn.Module):
@@ -99,11 +101,11 @@ def run_dagger():
     env = gym.make("Cat-v0")
     
     # 18 for rotation matrix + 4 for joint angles = 22 total dimensions
-    student_obs_dim = 13
+    student_obs_dim = 16
     act_dim = env.action_space.shape[0]
 
     print("Loading privileged expert policy...")
-    expert = PPO.load("cat_controller")
+    expert = PPO.load("cat_controller_1777010268.912757")
 
     # Initialize Student with restricted observation space
     student = StudentPolicy(student_obs_dim, act_dim)

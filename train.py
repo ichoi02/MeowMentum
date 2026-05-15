@@ -45,7 +45,7 @@ def train():
     reward_callback = TensorboardRewardCallback()
 
     model.learn(
-        total_timesteps=2000000,
+        total_timesteps=5000000,
         log_interval=1,
         progress_bar=True,
         callback=reward_callback

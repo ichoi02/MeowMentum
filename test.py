@@ -26,8 +26,9 @@ class StudentPolicy(nn.Module):
 
 def get_student_obs(full_obs):
     quats = full_obs[0:9] #FIXME
-    joint_angles = full_obs[18+7:18+7+4]
-    return np.concatenate([quats, joint_angles])
+    gyros = full_obs[18:21]
+    joint_angles = full_obs[18+6+7:18+6+7+4]
+    return np.concatenate([quats, gyros, joint_angles])
 
 def visualize():
     env = gym.make("Cat-v0")
@@ -38,7 +39,7 @@ def visualize():
         teacher = PPO.load("cat_controller")
     elif agent =='student':
         print("Loading student policy")
-        student_obs_dim = 13
+        student_obs_dim = 16
         act_dim = env.action_space.shape[0]
         student = StudentPolicy(student_obs_dim, act_dim)
         student.load_state_dict(torch.load("student_policy.pth"))
@@ -60,7 +61,7 @@ def visualize():
         viewer.cam.azimuth = 90
         viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD
 
-        slow = 0.3
+        slow = 2.0
 
         try:
             while viewer.is_running():
