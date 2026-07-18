@@ -38,10 +38,11 @@ bool ENCODER1_REVERSED = false;
 bool MOTOR2_REVERSED = true;
 bool ENCODER2_REVERSED = true;
 
-double Kp1 = 1024.0;
-double Kd1 = 102.4;
-double Kp2 = 3072.0;
-double Kd2 = 307.2;
+double Kp1 = 4096.0;
+double Kd1 = 409.6;
+// double Kp2 = 4096.0;
+double Kp2 = 1024.0;
+double Kd2 = 102.4;
 
 float deadband = 0.03;
 const int minPWM = 100;
