@@ -6,7 +6,7 @@
 #include <math.h>
 
 const float M1GEAR = 9.68;
-const float M2GEAR = 9.68;
+const float M2GEAR = 34.0;
 const int TICKS_PER_REV = 48;
 
 // Motor 1

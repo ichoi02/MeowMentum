@@ -47,7 +47,8 @@ import cat_env.env_util as util
 import socket
 
 # --- CONFIGURATION ---
-SN_FRONT = "18451300" 
+# USB serials (18452630 = back board)
+SN_FRONT = "18451300"
 SN_BACK  = "18452630"
 
 BAUD_RATE = 115200
