@@ -321,7 +321,7 @@ def main():
 
     print("Zeroing IMU quaternions...")
     front.reset_IMU()
-    back.reset_IMU()
+    # back.reset_IMU()
     time.sleep(0.5)
     
     # Flush any stale data that was transmitted before the reset happened

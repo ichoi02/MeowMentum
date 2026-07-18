@@ -1,6 +1,15 @@
 run_logs/
 # Teensy PD_control arduino-cli output (hardware/flash_pd_control_teensy.sh)
 hardware/.pd_teensy_build/
+# Teensy motor_test arduino-cli output (test/flash_motor_test_*.sh)
+test/.motor_test_build/
+# Teensy motor_power arduino-cli output (test/flash_motor_power_*.sh)
+test/.motor_power_build/
+# Teensy encoder_check arduino-cli output (test/flash_encoder_check_*.sh)
+test/.encoder_check_build/
+# Teensy back_sweep_45 arduino-cli output
+test/.back_sweep_45_build/
+test/logs/
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
