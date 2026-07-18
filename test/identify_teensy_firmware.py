@@ -60,6 +60,10 @@ def classify(text: str) -> str:
         return "motor_test_front (or debug)"
     if "motor_test_back" in text or "back DEBUG" in text:
         return "motor_test_back (or debug)"
+    if "PD_control_front" in text or "FIRMWARE PD_control_front" in text:
+        return "PD_control_front"
+    if "PD_control_back" in text or "FIRMWARE PD_control_back" in text:
+        return "PD_control_back"
     if "PD_control" in text or re.search(r"\d\.\d+,\d\.\d+", text):
         return "likely PD_control / other"
     if not text.strip():

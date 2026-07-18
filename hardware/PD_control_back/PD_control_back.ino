@@ -1,12 +1,10 @@
 #include <Encoder.h>
-#include <Wire.h>
-#include <Adafruit_BNO08x.h>
 #include <cstdio>
 #include <cstring>
 #include <math.h>
 
-const float M1GEAR = 9.68;
-const float M2GEAR = 34.0;
+const float M1GEAR = 34.0;
+const float M2GEAR = 9.68;
 const int TICKS_PER_REV = 48;
 
 // Motor 1
@@ -23,9 +21,6 @@ const int M2PWM = 10;
 const int M2EN = 12;
 Encoder enc2(15, 16);
 
-Adafruit_BNO08x bno08x;
-sh2_SensorValue_t sensorValue;
-
 // ==========================================
 // 2. HARDWARE CALIBRATION
 // ==========================================
@@ -39,8 +34,8 @@ bool ENCODER2_REVERSED = true;
 // 3. CONTROL SETTINGS
 // ==========================================
 // PD gains
-double Kp1 = 1024.0;
-double Kd1 = 10.24;
+double Kp1 = 4096.0;
+double Kd1 = 409.6;
 double Kp2 = 1024.0;
 double Kd2 = 102.4;
 
@@ -66,81 +61,14 @@ float lastErr2 = 0;
 uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
-// global IMU
-float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
-float acc_mag = 0.0;
-
-// Watchdog variables for I2C freeze recovery
-static uint32_t lastGameRotEventMs = 0;
-static const uint32_t IMU_STALE_MS = 1500;
-static const uint32_t IMU_RECOVER_COOLDOWN_MS = 2500;
-
 // ==========================================
-// 5. I2C RECOVERY FUNCTIONS
-// ==========================================
-
-void clearI2CBus() {
-  Wire.end();
-  
-  // Take manual control of the Teensy 4.0 default I2C pins
-  pinMode(18, INPUT_PULLUP); // SDA
-  pinMode(19, OUTPUT);       // SCL
-  digitalWrite(19, HIGH);
-  delay(1);
-  
-  // Pulse SCL until the sensor releases the SDA line (max 20 pulses)
-  for (int i = 0; i < 20; i++) {
-    if (digitalRead(18) == HIGH) {
-      break; 
-    }
-    digitalWrite(19, LOW);
-    delayMicroseconds(10);
-    digitalWrite(19, HIGH);
-    delayMicroseconds(10);
-  }
-  
-  // Release SCL to float HIGH
-  pinMode(19, INPUT_PULLUP); 
-  delay(10);
-  
-  Wire.begin();
-  
-  // Force a hardware timeout so the Wire library CANNOT freeze
-  Wire.setTimeout(10); 
-  Wire.setClock(50000); 
-}
-
-static bool bno08x_begin_and_enable() {
-  bool ok = false;
-  
-  for (int attempt = 0; attempt < 5 && !ok; attempt++) {
-    if (bno08x.begin_I2C(0x4A, &Wire)) ok = true;
-    else delay(50);
-  }
-  
-  if (!ok) {
-    return false;
-  }
-  
-  bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
-  bno08x.enableReport(SH2_ACCELEROMETER, 10000);
-  return true;
-}
-
-static void recover_bno08x_from_stall() {
-  clearI2CBus();
-  delay(50);
-  
-  if (bno08x_begin_and_enable()) {
-    lastGameRotEventMs = millis();
-  } 
-}
-
-// ==========================================
-// 6. SETUP
+// 5. SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+  Serial.println("# FIRMWARE PD_control_back EXPECT_SN=18452630");
 
   pinMode(M1INA, OUTPUT);
   pinMode(M1INB, OUTPUT);
@@ -167,54 +95,15 @@ void setup() {
 
   lastControlMicros = micros();
   lastPrintMillis = millis();
-
-  // IMU Setup (retry: transient I2C glitches on power-up)
-  Wire.begin();
-  Wire.setTimeout(10); 
-  Wire.setClock(50000); // 50kHz for long wire stability
-  
-  if (!bno08x_begin_and_enable()) {
-    while (1) { delay(100); } // Hang if totally dead on boot
-  }
-
-  lastGameRotEventMs = millis();
 }
 
 // ==========================================
-// 7. MAIN LOOP
+// 6. MAIN LOOP
 // ==========================================
 void loop() {
   handleSerialInput();
 
-  // 1. Check for silent internal sensor resets
-  if (bno08x.wasReset()) {
-    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, 10000);
-    bno08x.enableReport(SH2_ACCELEROMETER, 10000);
-    lastGameRotEventMs = millis();
-  }
-
-  int imu_budget = 5; 
-  while ((imu_budget-- > 0) && bno08x.getSensorEvent(&sensorValue)) {
-    switch (sensorValue.sensorId) {
-      case SH2_GAME_ROTATION_VECTOR:
-        imu_qr = sensorValue.un.gameRotationVector.real;
-        imu_qi = sensorValue.un.gameRotationVector.i;
-        imu_qj = sensorValue.un.gameRotationVector.j;
-        imu_qk = sensorValue.un.gameRotationVector.k;
-        lastGameRotEventMs = millis(); 
-        break;
-        
-      case SH2_ACCELEROMETER:
-        float ax = sensorValue.un.accelerometer.x;
-        float ay = sensorValue.un.accelerometer.y;
-        float az = sensorValue.un.accelerometer.z;
-        acc_mag = sqrt((ax * ax) + (ay * ay) + (az * az));
-        lastGameRotEventMs = millis(); 
-        break;
-    }
-  }
-
-  // 4. Run Controller
+  // Run Controller
   uint32_t nowMicros = micros();
   if ((uint32_t)(nowMicros - lastControlMicros) >= CONTROL_PERIOD_US) {
     double dt = (nowMicros - lastControlMicros) / 1000000.0;
@@ -222,17 +111,18 @@ void loop() {
     runController(dt);
   }
 
-  // 5. Print Telemetry
+  // Print Telemetry (no IMU — stub identity quat + zero accel)
+  // Format: qr,qi,qj,qk,angle1,angle2,acc_mag
   uint32_t nowMillis = millis();
   if ((uint32_t)(nowMillis - lastPrintMillis) >= PRINT_PERIOD_MS) {
     lastPrintMillis = nowMillis;
-    
+
     float angle1 = readEncoder1();
     float angle2 = readEncoder2();
-    
+
     int n = snprintf(s_telemBuf, sizeof(s_telemBuf),
                      "%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.4f\n",
-                     imu_qr, imu_qi, imu_qj, imu_qk, angle1, angle2, acc_mag);
+                     1.0f, 0.0f, 0.0f, 0.0f, angle1, angle2, 0.0f);
     if (n > 0 && n < (int)sizeof(s_telemBuf) &&
         Serial.availableForWrite() >= n) {
       Serial.write((const uint8_t *)s_telemBuf, (size_t)n);
@@ -241,7 +131,7 @@ void loop() {
 }
 
 // ==========================================
-// 8. CONTROL LOOP
+// 7. CONTROL LOOP
 // ==========================================
 void runController(double dt) {
   if (dt <= 0.0) {
@@ -278,7 +168,7 @@ void runController(double dt) {
 }
 
 // ==========================================
-// 9. SERIAL INPUT (non-blocking)
+// 8. SERIAL INPUT (non-blocking)
 // ==========================================
 static void processSerialLine(char *line) {
   while (*line == ' ' || *line == '\t') line++;
@@ -304,10 +194,8 @@ static void processSerialLine(char *line) {
     }
     delay(100);
     SCB_AIRCR = 0x05FA0004;
-  } else if (strcmp(line, "RESET_IMU") == 0) {
-    sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
-  } else if (strcmp(line, "RESET_I2C") == 0) {
-    recover_bno08x_from_stall();
+  } else if (strcmp(line, "RESET_IMU") == 0 || strcmp(line, "RESET_I2C") == 0) {
+    // No IMU on back board — ignore
   } else {
     float a, b;
     if (sscanf(line, "%f,%f", &a, &b) == 2) {
@@ -340,7 +228,7 @@ void handleSerialInput() {
 }
 
 // ==========================================
-// 10. TELEMETRY ENCODERS
+// 9. TELEMETRY ENCODERS
 // ==========================================
 float readEncoder1() {
   long pos = enc1.read();
@@ -355,7 +243,7 @@ float readEncoder2() {
 }
 
 // ==========================================
-// 11. MOTOR DRIVE FUNCTIONS
+// 10. MOTOR DRIVE FUNCTIONS
 // ==========================================
 void driveMotor1(double speed) {
   int pwmVal = constrain((int)abs(speed), 0, PWM_MAX);

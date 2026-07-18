@@ -40,9 +40,9 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains
 double Kp1 = 2048.0;
-double Kd1 = 204.8;
-double Kp2 = 20480.0;
-double Kd2 = 204.8;
+double Kd1 = 20.48;
+double Kp2 = 4096.0;
+double Kd2 = 409.6;
 
 // If the error is within this many ticks, motor stops
 float deadband = 0.03;
@@ -141,6 +141,9 @@ static void recover_bno08x_from_stall() {
 // ==========================================
 void setup() {
   Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+  Serial.println("# FIRMWARE PD_control_front EXPECT_SN=18451300");
 
   pinMode(M1INA, OUTPUT);
   pinMode(M1INB, OUTPUT);

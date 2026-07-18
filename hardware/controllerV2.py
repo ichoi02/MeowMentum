@@ -56,6 +56,10 @@ LOOP_HZ = 50
 
 CONTROL_DURATION = 0.8
 
+# Drop detect uses Front IMU only (Back has no IMU / stubs zeros).
+DROP_ACC_THRESH = 3.0       # freefall if below this
+DROP_GRAVITY_ARM = 7.0      # must see ~1g on Front before arming freefall
+
 # Bound serial draining per tick (~50Hz telemetry per board); unbounded reads starve the Python loop.
 SERIAL_DRAIN_MAX_LINES = 32
 
@@ -219,11 +223,20 @@ class TeensyInterface:
             parts = latest_line.split(',')
             if len(parts) == 7:
                 try:
-                    self.quat = [float(x) for x in parts[:4]]
-                    self.quat = self.align_imu_quaternions(np.array([self.quat]), self.name)
+                    raw_quat = [float(x) for x in parts[:4]]
                     self.m1_rad = float(parts[4])
                     self.m2_rad = float(parts[5])
                     self.acc_mag = float(parts[6])
+                    # Back board may stub IMU as zeros; keep prior/identity quat.
+                    qn = sum(v * v for v in raw_quat)
+                    if qn < 1e-12:
+                        if self.name == "Back":
+                            self.quat = [1.0, 0.0, 0.0, 0.0]
+                        # Front: leave previous quat (do not adopt zero-norm)
+                    else:
+                        self.quat = self.align_imu_quaternions(
+                            np.array([raw_quat]), self.name
+                        )
                 except ValueError:
                     pass
 
@@ -245,6 +258,8 @@ class TeensyInterface:
             
         elif imu_type == 'Back':
             r_align = R.from_euler('xyz', [180, 0, -90], degrees=True)
+        else:
+            return quats_wxyz.squeeze(0)
             
         r_global = r_align.inv() * r_raw * r_align
         
@@ -359,19 +374,39 @@ def main():
         print("Debug mode initiated: enter '[motor num] [target angle]'")
         threading.Thread(target=keyboard_input_thread, daemon=True).start()
     else:
-        print("Waiting for drop..")
-        while(True):
+        # Drop trigger: Front IMU only — do not read Back here (Back stubs acc_mag=0).
+        print(
+            f"Waiting for drop (Front IMU SN={SN_FRONT} only; "
+            f"arm when acc_mag>={DROP_GRAVITY_ARM}, trigger when <{DROP_ACC_THRESH})…"
+        )
+        drop_armed = False
+        while True:
             loop_start = time.time()
             front.update_sensor_data()
+            qn = sum(v * v for v in front.quat)
+            if qn < 1e-12:
+                elapsed = time.time() - loop_start
+                if elapsed < loop_period:
+                    time.sleep(loop_period - elapsed)
+                continue
             r = R.from_quat(front.quat, scalar_first=True)
             euler = r.as_euler(seq='xyz', degrees=True)
-            print(f"roll: {euler[0]}, pitch: {euler[1]}, yaw: {euler[2]}")
+            acc = front.acc_mag
+            if not drop_armed and acc >= DROP_GRAVITY_ARM:
+                drop_armed = True
+                print(f"Drop armed (Front acc_mag={acc:.3f})")
 
-            if front.acc_mag < 3.0:
-                print("Drop")
+            arm_state = "armed" if drop_armed else "waiting for ~1g on Front"
+            print(
+                f"[Front] roll: {euler[0]:.2f}, pitch: {euler[1]:.2f}, yaw: {euler[2]:.2f}, "
+                f"acc_mag: {acc:.3f} ({arm_state}; drop if armed and < {DROP_ACC_THRESH})"
+            )
+
+            if drop_armed and acc < DROP_ACC_THRESH:
+                print(f"Drop (Front acc_mag={acc:.3f} < {DROP_ACC_THRESH})")
                 drop_started = time.time()
                 break
-            
+
             elapsed = time.time() - loop_start
             if elapsed < loop_period:
                 time.sleep(loop_period - elapsed)
