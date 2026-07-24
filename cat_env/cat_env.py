@@ -8,12 +8,11 @@ import cat_env.env_util as util
 import mujoco
 import os
 
-np.random.seed(None)
-
 # ---- train parameters ----
-w_pos = 1.0 
+w_pos = 1.0
 w_sm = 0.1
 w_en = 1.0
+w_av = 0.01  # angular velocity penalty weight
 k = 0.2 # tanh gain param
 # --------------------------
 
@@ -23,8 +22,8 @@ class CatEnv(MujocoEnv, EzPickle):
     def __init__(self, render_mode=None):
         model_path = os.path.abspath("model/cat.xml")
         
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(56,), dtype=np.float64)
-        action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float64)
+        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(56,), dtype=np.float32)
+        action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32)
 
         MujocoEnv.__init__(
             self,
@@ -61,13 +60,14 @@ class CatEnv(MujocoEnv, EzPickle):
         # Initialize variables
         self.steps = 0
         self.max_steps = 37
-        self.prev_action = np.zeros_like(action_space.shape)
+        self.prev_action = np.zeros(self.action_space.shape, dtype=np.float32)
 
-        self.pd = []
-        self.pd.append(util.PDController(2.0, 0.2))
-        self.pd.append(util.PDController(20.0, 0.2))
-        self.pd.append(util.PDController(1.0, 0.1))
-        self.pd.append(util.PDController(1.0, 0.01))
+        # Per-joint PD gains, tuned in sim for a critically-damped (zeta~1) step
+        # response: fastest settling with no overshoot or Coulomb limit cycle, on
+        # each joint's composite inertia / stall torque / damping / friction.
+        # Order: [rot1, pitch, rot2, tail]. kp*(err) - kd*vel -> normalized [-1,1].
+        self.pd_nominal = [(5.0, 0.4), (20.0, 1.5), (5.0, 0.4), (30.0, 1.0)]
+        self.pd = [util.PDController(kp, kd) for kp, kd in self.pd_nominal]
 
         self.ctrls = []
 
@@ -84,10 +84,13 @@ class CatEnv(MujocoEnv, EzPickle):
             executed_action = action.copy()
 
         # PD control
-        executed_action[0] = util.map_value(executed_action[0], -1, 1, -np.pi*2, np.pi*2) # roll
-        executed_action[1] = util.map_value(executed_action[1], -1, 1, -np.pi/2, np.pi/2) # pitch
-        executed_action[2] = util.map_value(executed_action[2], -1, 1, -np.pi/2, np.pi/2) # tail
-
+        roll_range = self.model.jnt_range[1][1]
+        pitch_range = self.model.jnt_range[2][1]
+        tail_range = self.model.jnt_range[4][1]
+        executed_action[0] = util.map_value(executed_action[0], -1, 1, -roll_range, roll_range) # roll
+        executed_action[1] = util.map_value(executed_action[1], -1, 1, -pitch_range, pitch_range) # pitch
+        executed_action[2] = util.map_value(executed_action[2], -1, 1, -tail_range, tail_range) # tail
+        
         for _ in range(self.frame_skip):
             norm_torque = np.zeros(4)
 
@@ -115,8 +118,7 @@ class CatEnv(MujocoEnv, EzPickle):
             self.data.ctrl[:] = physical_torque
             mujoco.mj_step(self.model, self.data)
 
-        # print(executed_action)
-        # self.ctrls.append(np.hstack([executed_action, self.data.qpos[7:]]))
+        self.ctrls.append(np.hstack([executed_action, self.data.qpos[7:]]))
         # self.ctrls.append(physical_torque)
         observation = self._get_obs()
         reward, reward_info = self._get_reward(action)
@@ -137,7 +139,7 @@ class CatEnv(MujocoEnv, EzPickle):
 
     def reset_model(self):
         self.steps = 0
-        self.prev_action = np.zeros_like(self.action_space.shape)
+        self.prev_action = np.zeros(self.action_space.shape, dtype=np.float32)
         # print("---")
         # Domain randomization
         # Mass
@@ -145,12 +147,19 @@ class CatEnv(MujocoEnv, EzPickle):
         self.model.body_mass[:] = self.nominal_mass * mass_noise
 
         # Joint
-        damping_noise = np.random.uniform(0.8, 1.2, size=self.nominal_damping.shape)
+        # Damping is a nominal estimate (from motor no-load speed / stall torque),
+        # so randomize it wider (+/-30%) than the other params.
+        damping_noise = np.random.uniform(0.7, 1.3, size=self.nominal_damping.shape)
         self.model.dof_damping[:] = self.nominal_damping * damping_noise
-        armature_noise = np.random.uniform(0.8, 1.2, size=self.nominal_armature.shape)
+        # Armature is reflected rotor inertia estimated from motor class (no datasheet
+        # rotor inertia), so ~+/-2x uncertainty -> randomize wide (0.5-1.5).
+        armature_noise = np.random.uniform(0.5, 1.5, size=self.nominal_armature.shape)
         self.model.dof_armature[:] = self.nominal_armature * armature_noise
-        friction_noise = np.random.uniform(0.8, 1.2, size=self.nominal_frictionloss.shape)
+        friction_noise = np.random.uniform(0.7, 1.3, size=self.nominal_frictionloss.shape)
         self.model.dof_frictionloss[:] = self.nominal_frictionloss * friction_noise
+
+        # PD gains are NOT randomized: the exact sim-tuned gains are flashed to the
+        # hardware inner loop, so there is no gain uncertainty to be robust to.
 
         # COM position
         ipos_noise = np.random.uniform(-0.04, 0.04, size=self.nominal_ipos.shape)
@@ -162,7 +171,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self.model.body_inertia[:] = self.nominal_inertia * inertia_noise
 
         # Delay
-        self.action_delay = np.random.randint(0, 1)
+        self.action_delay = np.random.randint(0, 3)
         zero_action = np.zeros(self.action_space.shape)
         self.action_buffer = [zero_action.copy() for _ in range(self.action_delay)]
 
@@ -174,7 +183,8 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # randomize initial orientation
         random_roll = np.random.uniform(-np.pi, np.pi)
-        random_pitch = np.random.uniform(-np.pi/6, np.pi/6)
+        # random_pitch = np.random.uniform(-np.pi, np.pi)
+        random_pitch = 0
         random_yaw = np.random.uniform(-np.pi, np.pi)
 
         # TODO: randomize initial angular velocity
@@ -224,7 +234,7 @@ class CatEnv(MujocoEnv, EzPickle):
             front_body_pos, rear_body_pos,
             ctrl, step
         ])
-        return obs
+        return obs.astype(np.float32)
     
     def _get_reward(self, action):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
@@ -254,13 +264,27 @@ class CatEnv(MujocoEnv, EzPickle):
         ctrl = self.data.ctrl
         r_en = np.mean(ctrl**2) * w_en
 
-        penalty_factor = np.exp(-(r_sm + r_en))
+        # Angular velocity penalty (time-scaled: tolerated during rotation phase,
+        # penalized as we approach landing)
+        front_vel = np.zeros(6)
+        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_BODY,
+                                 self._body_idx["front_body"], front_vel, 1)
+        rear_vel = np.zeros(6)
+        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_BODY,
+                                 self._body_idx["rear_body"], rear_vel, 1)
+        front_ang_vel = front_vel[:3]
+        rear_ang_vel = rear_vel[:3]
+        ang_vel_sq = np.mean(front_ang_vel**2) + np.mean(rear_ang_vel**2)
+        r_av = ang_vel_sq * w_av * np.tanh(self.steps * k)
+
+        penalty_factor = np.exp(-(r_sm + r_en + r_av))
 
         final_reward = r_pos * penalty_factor
         reward_info = {
             "r_pos": r_pos,
             "r_sm": r_sm,
             "r_en": r_en,
+            "r_av": r_av,
             "penalty_factor": penalty_factor
         }
 

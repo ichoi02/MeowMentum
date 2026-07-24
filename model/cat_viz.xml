@@ -53,8 +53,8 @@
 
             <body name="tail" pos="0.05 0 0">
               <joint name="tail" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
-              <inertial pos="0.05 0 0" mass="0.2" diaginertia="0.00001 0.00017167 0.00017167"/>
-              <geom type="cylinder" size="0.01 0.05" pos="0.05 0 0" euler="0 1.5708 0" material="color2"/>
+              <inertial pos="0.2 0 0" mass="0.2" diaginertia="1e-6 1e-6 1e-6"/>
+              <geom type="cylinder" size="0.01 0.1" pos="0.1 0 0" euler="0 1.5708 0" mass="0" material="color2"/>
             </body>
             
           </body>

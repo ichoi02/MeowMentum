@@ -1,5 +1,5 @@
 import gymnasium as gym
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -18,35 +18,44 @@ class TensorboardRewardCallback(BaseCallback):
                 self.logger.record("rewards/r_pos", info["r_pos"])
                 self.logger.record("rewards/r_sm", info["r_sm"])
                 self.logger.record("rewards/r_en", info["r_en"])
+                self.logger.record("rewards/r_av", info["r_av"])
                 self.logger.record("rewards/penalty_factor", info["penalty_factor"])
         return True
 
 def train():
-    num_cpu = 10  # Change this to match the number of logical cores on your CPU
-    
-    # make_vec_env handles creating multiple instances of your environment
+    num_cpu = 10
+
     env = make_vec_env(
-        "Cat-v0", 
-        n_envs=num_cpu, 
-        vec_env_cls=SubprocVecEnv,                # Uses true multiprocessing
-        env_kwargs={"render_mode": "rgb_array"}   # Pass your gym.make kwargs here
+        "Cat-v0",
+        n_envs=num_cpu,
+        vec_env_cls=SubprocVecEnv,
+        #env_kwargs={"render_mode": "rgb_array"}
     )
-    
-    model = PPO(
-        "MlpPolicy", 
-        env, 
-        policy_kwargs=dict(net_arch=[256, 256]), 
-        verbose=1, 
-        tensorboard_log="./run_logs/", 
-        device="auto",
+
+    model = SAC(
+        "MlpPolicy",
+        env,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=1,
+        tensorboard_log="./run_logs/",
+        device="cpu",
         seed=None,
+        learning_rate=3e-4,
+        buffer_size=300_000,
+        learning_starts=10_000,   # collect some random transitions before learning
+        batch_size=256,
+        tau=0.005,
+        gamma=0.99,
+        train_freq=1,             # one gradient step per env step
+        gradient_steps=1,
+        ent_coef="auto",          # auto-tune entropy (key for multimodal exploration)
     )
 
     reward_callback = TensorboardRewardCallback()
 
     model.learn(
-        total_timesteps=5000000,
-        log_interval=1,
+        total_timesteps=2_000_000,
+        log_interval=20,
         progress_bar=True,
         callback=reward_callback
     )

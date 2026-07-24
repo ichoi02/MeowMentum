@@ -1,5 +1,5 @@
 import gymnasium as gym
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 import torch
 import torch.nn as nn
 import numpy as np
@@ -33,10 +33,10 @@ def get_student_obs(full_obs):
 def visualize():
     env = gym.make("Cat-v0")
 
-    agent = 'student'
+    agent = 'teacher'
     if agent == 'teacher':
         print("Loading teacher policy")
-        teacher = PPO.load("cat_controller")
+        teacher = SAC.load("cat_controller")
     elif agent =='student':
         print("Loading student policy")
         student_obs_dim = 16
@@ -61,7 +61,7 @@ def visualize():
         viewer.cam.azimuth = 90
         viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD
 
-        slow = 2.0
+        slow = 0.5
 
         try:
             while viewer.is_running():
