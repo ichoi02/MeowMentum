@@ -44,9 +44,9 @@
     <div class="nav-links">
       <a href="#abstract">Abstract</a>
       <a href="#drops">Drops</a>
+      <a href="#replay">Replay</a>
       <a href="#robot">Robot</a>
       <a href="#method">Method</a>
-      <a href="#replay">Replay</a>
       <a href="#results">Results</a>
     </div>
   </div>
@@ -119,6 +119,22 @@
             <button type="button" aria-pressed="false" data-clip="roll180_pitch15">180° + pitch 15°</button>
             <button type="button" aria-pressed="false" data-clip="roll180_pitch45">180° + pitch 45°</button>
           </div>
+        </div>
+        <div class="pair">
+          <figure class="clip">
+            <div class="clip-frame">
+              <video id="clip-notail" muted loop playsinline preload="metadata" aria-label="Drop without the tail"></video>
+            </div>
+            <figcaption><span><i class="swatch notail"></i>No tail</span><span class="mono">1.71 kg</span></figcaption>
+          </figure>
+          <figure class="clip">
+            <div class="clip-frame">
+              <video id="clip-tail" muted loop playsinline preload="metadata" aria-label="Drop with the tail"></video>
+            </div>
+            <figcaption><span><i class="swatch tail"></i>With tail</span><span class="mono">1.86 kg</span></figcaption>
+          </figure>
+        </div>
+        <div class="player-row">
           <div class="video-controls">
             <button class="icon-btn" type="button" id="clip-play" aria-label="Pause both videos">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
@@ -128,20 +144,74 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
             </button>
           </div>
+          <div class="progress" aria-hidden="true"><i id="clip-progress"></i></div>
         </div>
-        <div class="pair">
-          <figure class="clip">
-            <div class="clip-frame">
-              <video id="clip-notail" muted loop playsinline preload="metadata" aria-label="Drop without the tail"></video>
-            </div>
-          </figure>
-          <figure class="clip">
-            <div class="clip-frame">
-              <video id="clip-tail" muted loop playsinline preload="metadata" aria-label="Drop with the tail"></video>
-            </div>
-          </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ REPLAY ============ -->
+  <section class="block page" id="replay">
+    <div class="grid">
+      <div class="section-head" data-reveal>
+        <h2>Replay</h2>
+      </div>
+      <div class="replay wide mt-fig" id="replay-app" data-reveal>
+        <div class="stage3d" id="stage3d">
+          <div class="hud"><span id="hud-left">Hardware log</span><span id="hud-right"><b>0.000 s</b> · 0.00 m fallen</span></div>
+          <div class="hint" id="hint">Drag to orbit · outline: release pose · arrows: commanded joint targets</div>
+          <noscript><div class="fallback">The 3D replay needs JavaScript.</div></noscript>
         </div>
-        <div class="progress" aria-hidden="true"><i id="clip-progress"></i></div>
+        <div class="panel">
+          <div class="ctl">
+            <span class="lbl" id="lbl-source">Source</span>
+            <div class="seg small" role="group" aria-labelledby="lbl-source" id="r-source">
+              <button type="button" aria-pressed="true" data-v="hw">Hardware log</button>
+              <button type="button" aria-pressed="false" data-v="sim">Simulation</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="lbl" id="lbl-morph">Configuration</span>
+            <div class="seg small" role="group" aria-labelledby="lbl-morph" id="r-morph">
+              <button type="button" aria-pressed="true" data-v="tail">With tail</button>
+              <button type="button" aria-pressed="false" data-v="notail">No tail</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="lbl" id="lbl-conds">Release</span>
+            <div class="conds" id="r-conds" role="group" aria-labelledby="lbl-conds"></div>
+          </div>
+          <div class="ctl" id="r-trials-wrap">
+            <span class="lbl" id="lbl-trials">Drop</span>
+            <div class="trials" id="r-trials" role="group" aria-labelledby="lbl-trials"></div>
+          </div>
+          <div class="readout">
+            <div><span>Mean body tilt</span><b id="ro-tilt">–</b></div>
+            <div><span>Whole-cat score at 2.5&nbsp;m</span><b id="ro-score">–</b></div>
+            <div class="wide-ro"><span id="ro-policy-lbl">Policy that flew, identified by replaying the log</span><b id="ro-policy">–</b></div>
+          </div>
+          <div class="joints" role="group" aria-label="Joint angles">
+            <div class="jrow roll"><span>roll q<sub>r1</sub></span><div class="jbar"><i id="jb-roll"></i></div><b id="jv-roll">–</b></div>
+            <div class="jrow pitch"><span>pitch q<sub>p</sub></span><div class="jbar"><i id="jb-pitch"></i></div><b id="jv-pitch">–</b></div>
+            <div class="jrow tail" id="jr-tail"><span>tail q<sub>t</sub></span><div class="jbar"><i id="jb-tail"></i></div><b id="jv-tail">–</b></div>
+          </div>
+          <div class="minichart" id="r-chart"></div>
+        </div>
+        <div class="timeline">
+          <button class="play" type="button" id="r-play" aria-label="Pause">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-play" hidden><path d="M7 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L8.5 4.64A1 1 0 0 0 7 5.5Z"/></svg>
+          </button>
+          <div class="scrub">
+            <div class="marks" id="r-marks"></div>
+            <input type="range" id="r-scrub" min="0" max="1000" step="1" value="0" aria-label="Time since free-fall detection">
+          </div>
+          <div class="seg small" role="group" aria-label="Playback speed" id="r-speed">
+            <button type="button" aria-pressed="false" data-v="0.1">0.1×</button>
+            <button type="button" aria-pressed="true" data-v="0.25">0.25×</button>
+            <button type="button" aria-pressed="false" data-v="1">1×</button>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -373,72 +443,6 @@
           <img class="real k6" src="assets/img/method/real_6.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 6 of 6">
         </div>
       </figure>
-    </div>
-  </section>
-
-  <!-- ============ REPLAY ============ -->
-  <section class="block page" id="replay">
-    <div class="grid">
-      <div class="section-head" data-reveal>
-        <h2>Replay</h2>
-      </div>
-      <div class="replay wide mt-fig" id="replay-app" data-reveal>
-        <div class="stage3d" id="stage3d">
-          <div class="hud"><span id="hud-left">Hardware log</span><span id="hud-right"><b>0.000 s</b> · 0.00 m fallen</span></div>
-          <div class="hint" id="hint">Drag to orbit · outline: release pose · arrows: commanded joint targets</div>
-          <noscript><div class="fallback">The 3D replay needs JavaScript.</div></noscript>
-        </div>
-        <div class="panel">
-          <div class="ctl">
-            <span class="lbl" id="lbl-source">Source</span>
-            <div class="seg small" role="group" aria-labelledby="lbl-source" id="r-source">
-              <button type="button" aria-pressed="true" data-v="hw">Hardware log</button>
-              <button type="button" aria-pressed="false" data-v="sim">Simulation</button>
-            </div>
-          </div>
-          <div class="ctl">
-            <span class="lbl" id="lbl-morph">Configuration</span>
-            <div class="seg small" role="group" aria-labelledby="lbl-morph" id="r-morph">
-              <button type="button" aria-pressed="true" data-v="tail">With tail</button>
-              <button type="button" aria-pressed="false" data-v="notail">No tail</button>
-            </div>
-          </div>
-          <div class="ctl">
-            <span class="lbl" id="lbl-conds">Release</span>
-            <div class="conds" id="r-conds" role="group" aria-labelledby="lbl-conds"></div>
-          </div>
-          <div class="ctl" id="r-trials-wrap">
-            <span class="lbl" id="lbl-trials">Drop</span>
-            <div class="trials" id="r-trials" role="group" aria-labelledby="lbl-trials"></div>
-          </div>
-          <div class="readout">
-            <div><span>Mean body tilt</span><b id="ro-tilt">–</b></div>
-            <div><span>Whole-cat score at 2.5&nbsp;m</span><b id="ro-score">–</b></div>
-            <div class="wide-ro"><span id="ro-policy-lbl">Policy that flew, identified by replaying the log</span><b id="ro-policy">–</b></div>
-          </div>
-          <div class="joints" role="group" aria-label="Joint angles">
-            <div class="jrow roll"><span>roll q<sub>r1</sub></span><div class="jbar"><i id="jb-roll"></i></div><b id="jv-roll">–</b></div>
-            <div class="jrow pitch"><span>pitch q<sub>p</sub></span><div class="jbar"><i id="jb-pitch"></i></div><b id="jv-pitch">–</b></div>
-            <div class="jrow tail" id="jr-tail"><span>tail q<sub>t</sub></span><div class="jbar"><i id="jb-tail"></i></div><b id="jv-tail">–</b></div>
-          </div>
-          <div class="minichart" id="r-chart"></div>
-        </div>
-        <div class="timeline">
-          <button class="play" type="button" id="r-play" aria-label="Pause">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-play" hidden><path d="M7 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L8.5 4.64A1 1 0 0 0 7 5.5Z"/></svg>
-          </button>
-          <div class="scrub">
-            <div class="marks" id="r-marks"></div>
-            <input type="range" id="r-scrub" min="0" max="1000" step="1" value="0" aria-label="Time since free-fall detection">
-          </div>
-          <div class="seg small" role="group" aria-label="Playback speed" id="r-speed">
-            <button type="button" aria-pressed="false" data-v="0.1">0.1×</button>
-            <button type="button" aria-pressed="true" data-v="0.25">0.25×</button>
-            <button type="button" aria-pressed="false" data-v="1">1×</button>
-          </div>
-        </div>
-      </div>
     </div>
   </section>
 
