@@ -252,7 +252,9 @@ function headingFix(q0) {
   if (Math.hypot(ax.x, ax.y) < 0.2) return new THREE.Quaternion();
   return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.atan2(ax.y, ax.x));
 }
-const impactOf = () => (state.source === "hw" && series && series.impact_t != null ? series.impact_t : Infinity);
+// Hardware replays end exactly at impact (the accelerometer peak in the blanket, itself a
+// logged sample); simulated rollouts have no landing and run the full episode.
+const endT = () => (state.source === "hw" && series.impact_t != null ? series.impact_t : series.t[series.t.length - 1]);
 
 function load() {
   const cond = condByKey(state.cond);
@@ -308,7 +310,7 @@ seg("r-morph", "morph", () => { state.id = null; load(); });
 seg("r-speed", "speed");
 if (!sims.length) document.querySelector('#r-source button[data-v="sim"]').disabled = true;
 
-const HW_NOTE = "Hardware log: front-body orientation from the IMU and four joint encoders at 50 Hz; the rear segment is rebuilt from the joint chain. Heading is not observable from gravity, so each replay is turned to start facing the same way. Peak deceleration in the blanket (marked “impact”) comes 0.70–0.85 s after free-fall detection, so the last samples of every log show the landing, not the fall. Distance is the ballistic estimate ½gt² from free-fall detection, so near impact it can exceed the nominal 2.8 m drop. Scores are taken at 2.5 m of fall, before impact.";
+const HW_NOTE = "Hardware log: front-body orientation from the IMU and four joint encoders at 50 Hz; the rear segment is rebuilt from the joint chain. Heading is not observable from gravity, so each replay is turned to start facing the same way. Each replay ends at impact, the peak deceleration in the blanket, 0.70–0.85 s after free-fall detection; the samples logged after it are not shown. Distance is the ballistic estimate ½gt² from free-fall detection, so near impact it can exceed the nominal 2.8 m drop. Scores are taken at 2.5 m of fall, before impact.";
 const SIM_NOTE = "Simulation: one MuJoCo rollout of this configuration's student policy with nominal physics and clean sensing, released at rest with a straight spine and run for the full one-second episode, further than the 2.8 m hardware drop. Simulated rollouts are not scored.";
 
 function syncUI() {
@@ -345,7 +347,7 @@ function syncUI() {
   if (!hwMode && state.morph === "notail" && cond.roll === 180) note += " From the 180° roll releases the simulated no-tail student is not feet-down (mean tilt above 45°) at 2.5 m of fall; from the pitched ones it does not get there within the one-second episode.";
   $("#r-note").textContent = note;
   $("#r-chart-note").textContent = hwMode
-    ? "Line: this drop. Band: hardware mean ± SD for this release, first 0.64 s. Dashed: 2.5 m scoring point. Grey: after impact."
+    ? "Line: this drop, up to impact. Band: hardware mean ± SD for this release, first 0.64 s. Dashed: 2.5 m scoring point."
     : "Line: the simulated rollout. Band: hardware drops of this configuration and release (mean ± SD, first 0.64 s)" +
       (state.morph === "notail" && cond.roll === 180 && cond.pitch > 0 ? ", all flown with the with-tail policy" : "") +
       ". Dashed: 2.5 m of fall, where hardware drops are scored.";
@@ -357,12 +359,11 @@ function drawMarks() {
   const marks = $("#r-marks");
   marks.innerHTML = "";
   if (!series) return;
-  const T = series.t[series.t.length - 1];
+  const T = endT();
   const W = marks.clientWidth || 300;
   const list = [[Math.sqrt(2 / G), "1 m", ""], [Math.sqrt(4 / G), "2 m", ""], [T_EVAL, "2.5 m", ""]];
-  if (impactOf() < T) list.push([impactOf(), "impact", "impact"]);
-  // place labels by priority so the scoring point and impact win collisions; ticks always show
-  const prio = { impact: 0, "2.5 m": 1, "1 m": 2, "2 m": 3 };
+  // place labels by priority so the scoring point wins collisions; ticks always show
+  const prio = { "2.5 m": 1, "1 m": 2, "2 m": 3 };
   const placed = [];
   list.filter((m) => m[0] <= T).sort((a, b) => prio[a[1]] - prio[b[1]]).forEach(([tt, label, cls]) => {
     const px = (tt / T) * W, half = label.length * 3.2 + 3, x = (tt / T) * 100;
@@ -380,7 +381,7 @@ function setPlayIcon() {
   playBtn.setAttribute("aria-label", state.playing ? "Pause" : "Play");
 }
 playBtn.addEventListener("click", () => {
-  if (!state.playing && series && state.t >= series.t[series.t.length - 1]) state.t = 0;
+  if (!state.playing && series && state.t >= endT()) state.t = 0;
   state.playing = !state.playing;
   state.hold = 0;
   state.rewind = 0;
@@ -393,7 +394,7 @@ scrub.addEventListener("input", () => {
   state.playing = false;
   state.rewind = 0;
   setPlayIcon();
-  state.t = (scrub.value / 1000) * series.t[series.t.length - 1];
+  state.t = (scrub.value / 1000) * endT();
   frame(0);
   requestRender();
 });
@@ -407,7 +408,7 @@ function drawMini() {
   const svg = MM.svg;
   const MW = Math.round(Math.max(240, mini.clientWidth || 300)), MH = Math.round(Math.min(MW * 0.36, 130)) + 20;
   const mm = { l: 30, r: 6, t: 8, b: 18 };
-  const T = series.t[series.t.length - 1];
+  const T = endT();
   mx = (v) => mm.l + (v / T) * (MW - mm.l - mm.r);
   my = (v) => MH - mm.b - (Math.min(225, Math.max(0, v)) / 225) * (MH - mm.t - mm.b);
   const s = svg("svg", { viewBox: `0 0 ${MW} ${MH}`, width: MW, height: MH, role: "img", "aria-label": "Mean body tilt of this drop over time" }, mini);
@@ -430,15 +431,14 @@ function drawMini() {
     svg("path", { d: d + "Z", style: `fill:${col};fill-opacity:.16;stroke:none` }, s);
   }
   if (T_EVAL <= T) svg("line", { x1: mx(T_EVAL), x2: mx(T_EVAL), y1: mm.t, y2: MH - mm.b, class: "guide" }, s);
-  const tImp = impactOf();
-  let pre = "", post = "";
+  let line = "";
   series.t.forEach((t, i) => {
-    const pt = mx(t).toFixed(1) + "," + my(series.tilt[i]).toFixed(1);
-    if (t <= tImp) pre += (pre ? "L" : "M") + pt;
-    if (t >= tImp || (i + 1 < series.t.length && series.t[i + 1] > tImp && t <= tImp)) post += (post ? "L" : "M") + pt;
+    if (t <= T + 1e-9) line += (line ? "L" : "M") + mx(t).toFixed(1) + "," + my(series.tilt[i]).toFixed(1);
   });
-  if (post) svg("path", { d: post, style: "fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:3 3;stroke-linejoin:round" }, s);
-  svg("path", { d: pre, style: `fill:none;stroke:${col};stroke-width:2;stroke-linejoin:round` }, s);
+  svg("path", { d: line, style: `fill:none;stroke:${col};stroke-width:2;stroke-linejoin:round` }, s);
+  if (state.source === "hw" && series.impact_t != null) {
+    svg("text", { x: MW - mm.r, y: mm.t + 2, "text-anchor": "end", text: "impact", style: "font-size:10px;fill:var(--pitch)" }, ax);
+  }
   miniHead = svg("line", { x1: mm.l, x2: mm.l, y1: mm.t, y2: MH - mm.b, style: "stroke:var(--ink);stroke-width:1" }, s);
   miniDot = svg("circle", { r: 3.6, cx: mm.l, cy: my(series.tilt[0]), style: "fill:var(--ink);stroke:var(--surface);stroke-width:1.5" }, s);
   frame(0);
@@ -463,7 +463,7 @@ function setBar(id, v, range) {
 const REWIND = 0.45;   // s, eased return to the release pose between loops
 function frame(dt) {
   if (!series) return;
-  const n = series.t.length, T = series.t[n - 1];
+  const T = endT();
   if (state.playing && dt > 0) {
     if (state.t >= T) {
       state.hold += dt;
@@ -484,10 +484,10 @@ function frame(dt) {
   if (state.morph !== "tail") jv[3] = 0;
   pose(robot, _q, jv);
   const tilt = series.tilt[i] + (series.tilt[i + 1] - series.tilt[i]) * u;
-  const tImp = impactOf();
-  const d = 0.5 * G * Math.min(state.t, tImp) ** 2;
-  $("#hud-right").innerHTML = state.t > tImp
-    ? `<b>${state.t.toFixed(3)} s</b> · landed`
+  const atImpact = state.source === "hw" && series.impact_t != null && state.t >= T - 1e-9;
+  const d = 0.5 * G * state.t ** 2;
+  $("#hud-right").innerHTML = atImpact
+    ? `<b>${state.t.toFixed(3)} s</b> · impact`
     : `<b>${state.t.toFixed(3)} s</b> · ${d.toFixed(2)} m fallen`;
   $("#ro-tilt").textContent = tilt.toFixed(1) + "°";
   $("#jv-roll").textContent = MM.fmt(jv[0], 2) + " rad";
@@ -497,7 +497,7 @@ function frame(dt) {
   setBar("pitch", jv[1], RANGE.pitch);
   setBar("tail", state.morph === "tail" ? jv[3] : 0, RANGE.tail);
   if (document.activeElement !== scrub) scrub.value = String(Math.round((state.t / T) * 1000));
-  scrub.setAttribute("aria-valuetext", state.t > tImp ? `${state.t.toFixed(2)} s, landed` : `${state.t.toFixed(2)} s, ${d.toFixed(2)} m fallen`);
+  scrub.setAttribute("aria-valuetext", atImpact ? `${state.t.toFixed(2)} s, impact` : `${state.t.toFixed(2)} s, ${d.toFixed(2)} m fallen`);
   if (miniHead) {
     const x = mx(state.t);
     miniHead.setAttribute("x1", x); miniHead.setAttribute("x2", x);

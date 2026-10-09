@@ -580,7 +580,6 @@ table.results td:first-child { white-space: nowrap; color: var(--ink); font-weig
 .scrub input[type="range"] { width: 100%; margin: 0; accent-color: var(--ink); cursor: pointer; position: relative; z-index: 2; background: transparent; }
 .scrub .marks { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; font-family: var(--f-mono); font-size: 0.625rem; color: var(--muted); }
 .scrub .marks span { position: absolute; top: -3px; transform: translateX(-50%); white-space: nowrap; }
-.scrub .marks span.impact { color: var(--pitch); }
 .scrub .marks i { position: absolute; bottom: 4px; width: 1px; height: 6px; background: var(--line-strong); }
 @media (max-width: 980px) {
   .replay { grid-template-columns: minmax(0, 1fr); }
