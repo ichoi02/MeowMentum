@@ -141,9 +141,9 @@ The drop logs are kept exactly as recorded. [data/README.md](data/README.md) and
 - **Excluded short drop.** One with-tail drop reached impact before the 2.5 m evaluation
   point. It is excluded from the whole-cat score, so the with-tail n is 35.
 - **No-tail drops flown with the with-tail policy.** Replay shows that 19 of the 37
-  no-tail drops were flown with the with-tail policy: every no-tail pitch-sweep drop and
-  one roll-180 drop. The controller defaulted to `--variant tail` at the time; the flag
-  is now required.
+  no-tail drops were flown with the with-tail policy: all 18 pitched no-tail drops and
+  one roll-180°, pitch-0° drop, which is 19 of the 24 no-tail drops in the pitch sweep.
+  The controller defaulted to `--variant tail` at the time; the flag is now required.
 - **Date labels.** Four filename date labels do not match the git history of the logs.
 
 ## Project page
