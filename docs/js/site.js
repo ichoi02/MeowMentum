@@ -474,7 +474,7 @@
 
   /* ---------------- results table scroll cue ---------------- */
   function tableCue() {
-    $$(".table-wrap").forEach(function (w) {
+    $$(".table-wrap, .pipeline-wrap").forEach(function (w) {
       var set = function () { w.classList.toggle("scrolls", w.scrollWidth > w.clientWidth + 2 && w.scrollLeft + w.clientWidth < w.scrollWidth - 2); };
       w.addEventListener("scroll", set, { passive: true });
       window.addEventListener("resize", set);

@@ -148,9 +148,6 @@ const GEO = {
   rear: shellGeometry(1),
   shaft: new THREE.CylinderGeometry(0.013, 0.013, 0.052, 20).rotateZ(Math.PI / 2),
   housing: new THREE.BoxGeometry(0.046, 0.042, 0.05),
-  ringX: new THREE.TorusGeometry(0.026, 0.0062, 12, 48).rotateY(Math.PI / 2),
-  ringY: new THREE.TorusGeometry(0.033, 0.0062, 12, 48).rotateX(Math.PI / 2),
-  ringT: new THREE.TorusGeometry(0.022, 0.0058, 12, 48).rotateX(Math.PI / 2),
   foot: new THREE.SphereGeometry(0.016, 20, 14).scale(1, 1, 0.75),
   rod: new THREE.CylinderGeometry(0.0055, 0.0055, 0.2, 14).rotateZ(-Math.PI / 2).translate(0.1, 0, 0),
   tip: new THREE.CylinderGeometry(0.012, 0.012, 0.036, 18).rotateZ(-Math.PI / 2).translate(0.182, 0, 0),
@@ -168,6 +165,60 @@ function part(geo, mat, parent, pos, ghost) {
   parent.add(m);
   return m;
 }
+/* Joint arrows: a thin arc around each joint axis from the measured angle to the
+   commanded target, with the head at the target. Arcs live in the joint's parent
+   frame, where "angle 0" is a fixed reference direction. */
+const ARROW = { tube: 0.0021, head: 0.0062, headLen: 0.018, minRad: 0.05 };
+const arcCache = new Map();
+function arcGeo(R, deg) {
+  const key = R + ":" + deg;
+  let g = arcCache.get(key);
+  if (!g) {
+    g = new THREE.TorusGeometry(R, ARROW.tube, 6, Math.max(6, Math.round(deg / 3)), THREE.MathUtils.degToRad(deg));
+    arcCache.set(key, g);
+  }
+  return g;
+}
+const headGeo = new THREE.ConeGeometry(ARROW.head, ARROW.headLen, 16);
+function basis(x, y, z) {
+  const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z));
+  return new THREE.Quaternion().setFromRotationMatrix(m);
+}
+// Columns map the arc's XY plane (angle 0 along X, positive towards Y) onto the joint:
+// R_axis(theta) applied to the reference direction = cos(theta) X + sin(theta) Y.
+const ARC_ROLL = basis([0, 0, 1], [0, -1, 0], [1, 0, 0]);   // axis x, 0 = body up
+const ARC_PITCH = basis([0, 0, 1], [1, 0, 0], [0, 1, 0]);   // axis y, 0 = body up
+const ARC_TAIL = basis([1, 0, 0], [0, 0, -1], [0, 1, 0]);   // axis y, 0 = along the rod
+function makeArrow(parent, pos, quat, R, mat) {
+  const g = new THREE.Group();
+  g.position.set(pos[0], pos[1], pos[2]);
+  g.quaternion.copy(quat);
+  parent.add(g);
+  const arc = new THREE.Mesh(arcGeo(R, 10), mat);
+  const head = new THREE.Mesh(headGeo, mat);
+  g.add(arc, head);
+  g.visible = false;
+  return { g, arc, head, R };
+}
+const _yAxis = new THREE.Vector3(0, 1, 0), _tan = new THREE.Vector3();
+function setArrow(a, q, target) {
+  const lim = 1.9 * Math.PI;
+  const d = Math.max(-lim, Math.min(lim, target - q));
+  if (Math.abs(d) < ARROW.minRad) { a.g.visible = false; return; }
+  a.g.visible = true;
+  const end = q + d, dir = Math.sign(d);
+  const shrink = (ARROW.headLen * 0.8) / a.R;               // stop the arc under the head
+  const span = Math.abs(d) - shrink;
+  a.arc.visible = span > 0.02;
+  if (a.arc.visible) {
+    a.arc.geometry = arcGeo(a.R, Math.max(1, Math.round(THREE.MathUtils.radToDeg(span))));
+    a.arc.rotation.z = dir > 0 ? q : end + shrink;
+  }
+  _tan.set(-Math.sin(end), Math.cos(end), 0).multiplyScalar(dir);
+  a.head.quaternion.setFromUnitVectors(_yAxis, _tan);
+  a.head.position.set(a.R * Math.cos(end), a.R * Math.sin(end), 0).addScaledVector(_tan, -ARROW.headLen / 2);
+}
+
 function buildRobot(ghost) {
   const front = new THREE.Group();
   part(GEO.front, mats.shell, front, [0, 0, 0], ghost);
@@ -176,28 +227,28 @@ function buildRobot(ghost) {
     part(GEO.foot, mats.foot, front, [-0.034, -0.03, -0.052]);
   }
   const s1 = new THREE.Group(); s1.position.set(0.1, 0, 0); front.add(s1);          // rot1 about x
-  if (!ghost) {
-    part(GEO.shaft, mats.metal, s1, [-0.026, 0, 0]);
-    part(GEO.ringX, mats.roll, s1, [-0.036, 0, 0]);
-  }
+  if (!ghost) part(GEO.shaft, mats.metal, s1, [-0.026, 0, 0]);
   const s2 = new THREE.Group(); s1.add(s2);                                           // pitch about y
   if (!ghost) {
     part(GEO.housing, mats.housing, s2, [0, 0, 0]);
-    part(GEO.ringY, mats.pitch, s2, [0, 0, 0]);
     part(GEO.shaft, mats.metal, s2, [0.026, 0, 0]);
   }
   const rear = new THREE.Group(); rear.position.set(0.1, 0, 0); s2.add(rear);       // rot2 about x
   part(GEO.rear, mats.shell, rear, [0, 0, 0], ghost);
   if (!ghost) {
-    part(GEO.ringX, mats.roll, rear, [-0.064, 0, 0]);
     part(GEO.foot, mats.foot, rear, [0.034, 0.03, -0.052]);
     part(GEO.foot, mats.foot, rear, [0.034, -0.03, -0.052]);
   }
   const tail = new THREE.Group(); tail.position.set(0.05, 0, 0); rear.add(tail);    // tail about y
-  if (!ghost) part(GEO.ringT, mats.tail, tail, [0.03, 0, 0]);
   part(GEO.rod, mats.metal, tail, [0, 0, 0], ghost);
   part(GEO.tip, mats.metal, tail, [0, 0, 0], ghost);
-  return { front, s1, s2, rear, tail };
+  const arrows = ghost ? null : {
+    rot1: makeArrow(front, [0.07, 0, 0], ARC_ROLL, 0.08, mats.roll),
+    pitch: makeArrow(s1, [0, 0, 0], ARC_PITCH, 0.074, mats.pitch),
+    rot2: makeArrow(s2, [0.036, 0, 0], ARC_ROLL, 0.08, mats.roll),
+    tail: makeArrow(rear, [0.05, 0, 0], ARC_TAIL, 0.115, mats.tail),
+  };
+  return { front, s1, s2, rear, tail, arrows };
 }
 
 // world: data is z-up; three.js is y-up
@@ -447,6 +498,7 @@ function drawMini() {
 /* ---------------- frame ---------------- */
 const _q = new THREE.Quaternion();
 const jv = [0, 0, 0, 0];
+const cv = [0, 0, 0, 0];
 function sample(t) {
   const ts = series.t, n = ts.length;
   if (t <= ts[0]) return { i: 0, u: 0 };
@@ -483,6 +535,19 @@ function frame(dt) {
   }
   if (state.morph !== "tail") jv[3] = 0;
   pose(robot, _q, jv);
+  if (series.c) {
+    const c0 = series.c[i], c1 = series.c[i + 1];
+    for (let k = 0; k < 4; k++) cv[k] = c0[k] + (c1[k] - c0[k]) * u;
+    const A = robot.arrows, show = state.rewind === 0;
+    if (show) {
+      setArrow(A.rot1, jv[0], cv[0]);
+      setArrow(A.pitch, jv[1], cv[1]);
+      setArrow(A.rot2, jv[2], cv[2]);
+      if (state.morph === "tail") setArrow(A.tail, jv[3], cv[3]); else A.tail.g.visible = false;
+    } else {
+      for (const a of Object.values(A)) a.g.visible = false;
+    }
+  }
   const tilt = series.tilt[i] + (series.tilt[i + 1] - series.tilt[i]) * u;
   const atImpact = state.source === "hw" && series.impact_t != null && state.t >= T - 1e-9;
   const d = 0.5 * G * state.t ** 2;

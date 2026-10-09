@@ -56,7 +56,6 @@
       <a href="#method">Method</a>
       <a href="#replay">Replay</a>
       <a href="#results">Results</a>
-      <a href="#discussion">Discussion</a>
     </div>
     <button class="icon-btn" id="theme" type="button" aria-label="Dark theme" aria-pressed="false">
       <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
@@ -80,7 +79,6 @@
         <p class="hero-title" data-load style="--d:220">A multi-strategy aerial self-righting robot for evaluating the contribution of an actuated tail across fall conditions</p>
         <!-- Authors are withheld while the paper is under double-blind review. Replace this line when it is not. -->
         <p class="authors" data-load style="--d:300"><span>Anonymous authors</span><span>Under double-blind review</span></p>
-        <p class="tldr" data-load style="--d:380">A cat-inspired robot with an actuated spine and tail rights itself in free fall, using a policy trained only in simulation and run onboard. Averaged over its drops, it turned feet-down within 1&nbsp;m of falling with the tail and within 2&nbsp;m without it. The tail raised the whole-cat score, a 0–1 measure of righting (adjusted +0.157, <i>p</i>&nbsp;=&nbsp;0.0016), clearly across roll releases and inconclusively across pitch releases.</p>
         <div class="actions" data-load style="--d:460">
           <a class="btn primary" href="https://github.com/ichoi02/MeowMentumV2">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
@@ -104,7 +102,6 @@
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="i-play" hidden><path d="M7 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L8.5 4.64A1 1 0 0 0 7 5.5Z"/></svg>
           </button>
         </div>
-        <figcaption>With tail, released upside down and pitched 45° nose-down. Slow motion; the real fall lasts about 0.8&nbsp;s.</figcaption>
       </figure>
     </div>
   </header>
@@ -227,67 +224,203 @@
         <h2>Trained in simulation, deployed zero-shot</h2>
       </div>
       <div class="prose" data-reveal>
-        <p>Because the mass matrix and momentum coupling change with every joint configuration, the righting dynamics are three-dimensional and configuration dependent. Rather than prescribing a fixed manoeuvre, we learn a closed-loop controller for each morphology through an identical pipeline.</p>
+        <p>The righting dynamics change with every joint configuration, so rather than prescribing a fixed manoeuvre we learn a closed-loop controller for each morphology through the same pipeline.</p>
       </div>
-      <ol class="pipeline wide mt-fig" data-reveal>
-        <li class="stage">
-          <h3>Simulate</h3>
-          <p>A simplified MuJoCo model of each morphology (box-shaped segments, a point-mass tail) with the robot's joint layout and approximate segment masses. Each episode is a one-second fall from a random attitude and spin, with the physics randomised per episode.</p>
-          <span class="rate">1 kHz physics · 50 Hz policy</span>
-          <svg class="arrow" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9.5" fill="var(--bg)" stroke="currentColor"/><path d="M8 6l4 4-4 4" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </li>
-        <li class="stage">
-          <h3>Teacher</h3>
-          <p>Soft Actor-Critic on a privileged, yaw-invariant state that includes the randomised physical parameters. A temporal smoothness term in the actor loss keeps the targets trackable.</p>
-          <span class="rate">73-D state · MLP 2 × 256</span>
-          <svg class="arrow" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9.5" fill="var(--bg)" stroke="currentColor"/><path d="M8 6l4 4-4 4" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </li>
-        <li class="stage">
-          <h3>Student</h3>
-          <p>DAgger distils the teacher into a policy that sees only what the robot measures: gravity from the front IMU, four joint angles, its previous action and the step count, with noise and bias injected into the readings.</p>
-          <span class="rate">11-D observation · 50 × 2,000 steps</span>
-          <svg class="arrow" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9.5" fill="var(--bg)" stroke="currentColor"/><path d="M8 6l4 4-4 4" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </li>
-        <li class="stage">
-          <h3>Deploy</h3>
-          <p>The student runs as ONNX on the Raspberry Pi, which low-pass filters its roll, pitch and tail targets and sends them to PD loops on two Teensy boards. Detecting free fall starts one second of control: 50 policy steps, the length of a simulated episode.</p>
-          <span class="rate">50 Hz policy · 1 kHz PD</span>
-        </li>
-      </ol>
-      <div class="method-grid wide mt-fig">
-        <figure class="plate strip" data-reveal>
-          <div class="plate-img light"><img src="assets/img/sim_vs_real.jpg" width="846" height="1198" loading="lazy" alt="Two columns of snapshots, top to bottom, of the robot released upside down and pitched nose-down: the MuJoCo model on the left and the physical robot on the right, both ending feet-down"></div>
-          <figcaption>The same release, roll 180° and pitch 45° with the tail, top to bottom. Left: the MuJoCo model used for training. Right: snapshots from a hardware drop, with a 10&nbsp;cm scale bar.</figcaption>
-        </figure>
-        <div class="prose" data-reveal>
-          <h3>Why internal motion turns the body</h3>
-          <p>In free fall gravity acts through the centre of mass, so, neglecting air drag, the centroidal angular momentum is conserved. Expressed in the front body, its angular velocity is set by the momentum at release and by how fast the joints move:</p>
-          <div class="eq" data-tex="\omega_F = I_L^{-1}(\mathbf q)\,\big[\,R_F^{\top}\mathbf H_{C,0} - A(\mathbf q)\,\dot{\mathbf q}_j\,\big]">ω_F = I_L⁻¹(q) [ R_Fᵀ H_C,0 − A(q) q̇_j ]</div>
-          <p>The locked inertia <span class="tex" data-tex="I_L">I_L</span> and the momentum-coupling matrix <span class="tex" data-tex="A">A</span> both depend on the joint configuration, and the tail changes both. The controller learns to exploit this coupling.</p>
-          <h3 class="mt-tight">Reward</h3>
-          <p>Each step rewards the uprightness of both segments, <span class="tex" data-tex="u_i = 1 - \varphi_i/\pi">u_i = 1 − φ_i/π</span>, where <span class="tex" data-tex="\varphi_i">φ_i</span> is the angle between a segment's up vector and the world's. A product term is largest when both are upright at once, and a small penalty on body angular velocity discourages unnecessary manoeuvring:</p>
-          <div class="eq" data-tex="r_t = \tfrac14\,(u_f + u_r) + \tfrac12\,u_f u_r \;-\; \text{penalty}">r_t = ¼(u_f + u_r) + ½ u_f u_r − penalty</div>
-          <details class="more">
-            <summary>Domain randomisation, drawn per episode</summary>
-            <div class="table-wrap">
-              <table class="data" aria-label="Per-episode domain randomisation">
-                <thead><tr><th>Parameter</th><th>Type</th><th class="r">Range</th></tr></thead>
-                <tbody>
-                  <tr><td>Body mass</td><td>multiplier</td><td class="r">0.8 – 1.2</td></tr>
-                  <tr><td>Centre of mass</td><td>offset</td><td class="r">±0.04 m</td></tr>
-                  <tr><td>Inertia tensor</td><td>multiplier</td><td class="r">0.8 – 1.2</td></tr>
-                  <tr><td>Joint damping</td><td>multiplier</td><td class="r">0.7 – 1.3</td></tr>
-                  <tr><td>Armature</td><td>multiplier</td><td class="r">0.4 – 2.5</td></tr>
-                  <tr><td>Friction loss</td><td>multiplier</td><td class="r">0.7 – 1.3</td></tr>
-                  <tr><td>Torque limit</td><td>multiplier</td><td class="r">0.8 – 1.2</td></tr>
-                  <tr><td>PD gains</td><td>multiplier</td><td class="r">0.8 – 1.2</td></tr>
-                  <tr><td>Action delay</td><td>steps</td><td class="r">0, 1 or 2</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </details>
+      <figure class="method-fig wide mt-fig" data-reveal>
+        <div class="pipeline-wrap">
+      <svg class="pipeline-fig" viewBox="0 0 1178 278" role="img" aria-label="Pipeline: a MuJoCo simulation with randomised physics trains a Soft Actor-Critic teacher on a privileged 73-dimensional state; DAgger distils it into a student that sees an 11-dimensional onboard observation; the student runs as ONNX on the robot at 50 Hz with 1 kHz PD loops.">
+        <defs><clipPath id="pn-clip1"><rect x="13" y="13" width="212" height="106" rx="8"/></clipPath><clipPath id="pn-clip4"><rect x="955" y="13" width="212" height="106" rx="8"/></clipPath><marker id="pn-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="pn-head"/></marker></defs>
+        <rect x="1" y="1" width="236" height="242" rx="12" class="pn-box"/>
+        <image href="assets/img/method/thumb_sim.jpg" x="13" y="13" width="212" height="106" preserveAspectRatio="xMidYMid slice" clip-path="url(#pn-clip1)"/>
+        <text x="15" y="146" class="pn-step">01 · Simulate</text>
+        <text x="15" y="170" class="pn-title">MuJoCo, 1 kHz</text>
+        <text x="15" y="193" class="pn-text">Random release attitude and spin</text>
+        <text x="15" y="211" class="pn-text">Physics randomised every episode</text>
+        <text x="15" y="229" class="pn-text">One-second fall, policy at 50 Hz</text>
+        <rect x="315" y="1" width="236" height="242" rx="12" class="pn-box"/>
+        <rect x="327" y="13" width="212" height="106" rx="8" class="pn-well"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="24.0" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="35.3" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="46.7" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="58.0" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="69.3" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="80.7" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="24.0" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="37.6" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="51.2" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="64.8" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="78.4" class="pn-edge"/>
+        <line x1="375.0" y1="92.0" x2="433.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="24.0" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="24.0" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="24.0" x2="491.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="37.6" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="37.6" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="37.6" x2="491.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="51.2" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="51.2" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="51.2" x2="491.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="64.8" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="64.8" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="64.8" x2="491.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="78.4" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="78.4" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="78.4" x2="491.0" y2="92.0" class="pn-edge"/>
+        <line x1="433.0" y1="92.0" x2="491.0" y2="24.0" class="pn-edge"/>
+        <line x1="433.0" y1="92.0" x2="491.0" y2="58.0" class="pn-edge"/>
+        <line x1="433.0" y1="92.0" x2="491.0" y2="92.0" class="pn-edge"/>
+        <circle cx="375.0" cy="24.0" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="35.3" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="46.7" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="58.0" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="69.3" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="80.7" r="3.4" class="pn-node"/>
+        <circle cx="375.0" cy="92.0" r="3.4" class="pn-node"/>
+        <circle cx="433.0" cy="24.0" r="4" class="pn-node"/>
+        <circle cx="433.0" cy="37.6" r="4" class="pn-node"/>
+        <circle cx="433.0" cy="51.2" r="4" class="pn-node"/>
+        <circle cx="433.0" cy="64.8" r="4" class="pn-node"/>
+        <circle cx="433.0" cy="78.4" r="4" class="pn-node"/>
+        <circle cx="433.0" cy="92.0" r="4" class="pn-node"/>
+        <circle cx="491.0" cy="24.0" r="4.6" style="fill:var(--roll)"/>
+        <circle cx="491.0" cy="58.0" r="4.6" style="fill:var(--pitch)"/>
+        <circle cx="491.0" cy="92.0" r="4.6" style="fill:var(--tailj)"/>
+        <text x="375" y="110" class="pn-tag" text-anchor="middle">73-D</text>
+        <text x="491" y="110" class="pn-tag" text-anchor="middle">targets</text>
+        <text x="329" y="146" class="pn-step">02 · Teacher</text>
+        <text x="329" y="170" class="pn-title">Soft Actor-Critic</text>
+        <text x="329" y="193" class="pn-text">Privileged state, 73-D,</text>
+        <text x="329" y="211" class="pn-text">including the randomised physics</text>
+        <text x="329" y="229" class="pn-text">Smoothness term in the actor loss</text>
+        <rect x="629" y="1" width="236" height="242" rx="12" class="pn-box"/>
+        <rect x="641" y="13" width="212" height="106" rx="8" class="pn-well"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="24.0" class="pn-edge"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="37.6" class="pn-edge"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="51.2" class="pn-edge"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="64.8" class="pn-edge"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="78.4" class="pn-edge"/>
+        <line x1="689.0" y1="24.0" x2="747.0" y2="92.0" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="24.0" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="37.6" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="51.2" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="64.8" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="78.4" class="pn-edge"/>
+        <line x1="689.0" y1="46.7" x2="747.0" y2="92.0" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="24.0" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="37.6" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="51.2" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="64.8" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="78.4" class="pn-edge"/>
+        <line x1="689.0" y1="69.3" x2="747.0" y2="92.0" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="24.0" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="37.6" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="51.2" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="64.8" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="78.4" class="pn-edge"/>
+        <line x1="689.0" y1="92.0" x2="747.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="24.0" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="24.0" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="24.0" x2="805.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="37.6" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="37.6" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="37.6" x2="805.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="51.2" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="51.2" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="51.2" x2="805.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="64.8" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="64.8" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="64.8" x2="805.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="78.4" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="78.4" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="78.4" x2="805.0" y2="92.0" class="pn-edge"/>
+        <line x1="747.0" y1="92.0" x2="805.0" y2="24.0" class="pn-edge"/>
+        <line x1="747.0" y1="92.0" x2="805.0" y2="58.0" class="pn-edge"/>
+        <line x1="747.0" y1="92.0" x2="805.0" y2="92.0" class="pn-edge"/>
+        <circle cx="689.0" cy="24.0" r="4" class="pn-node"/>
+        <circle cx="689.0" cy="46.7" r="4" class="pn-node"/>
+        <circle cx="689.0" cy="69.3" r="4" class="pn-node"/>
+        <circle cx="689.0" cy="92.0" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="24.0" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="37.6" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="51.2" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="64.8" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="78.4" r="4" class="pn-node"/>
+        <circle cx="747.0" cy="92.0" r="4" class="pn-node"/>
+        <circle cx="805.0" cy="24.0" r="4.6" style="fill:var(--roll)"/>
+        <circle cx="805.0" cy="58.0" r="4.6" style="fill:var(--pitch)"/>
+        <circle cx="805.0" cy="92.0" r="4.6" style="fill:var(--tailj)"/>
+        <text x="689" y="110" class="pn-tag" text-anchor="middle">11-D</text>
+        <text x="805" y="110" class="pn-tag" text-anchor="middle">targets</text>
+        <text x="643" y="146" class="pn-step">03 · Student</text>
+        <text x="643" y="170" class="pn-title">DAgger distillation</text>
+        <text x="643" y="193" class="pn-text">Onboard observation, 11-D:</text>
+        <text x="643" y="211" class="pn-text">IMU gravity, four joint encoders,</text>
+        <text x="643" y="229" class="pn-text">last action and step count</text>
+        <rect x="943" y="1" width="236" height="242" rx="12" class="pn-box"/>
+        <image href="assets/img/method/thumb_robot.jpg" x="955" y="13" width="212" height="106" preserveAspectRatio="xMidYMid slice" clip-path="url(#pn-clip4)"/>
+        <text x="957" y="146" class="pn-step">04 · Robot</text>
+        <text x="957" y="170" class="pn-title">Raspberry Pi + Teensy</text>
+        <text x="957" y="193" class="pn-text">ONNX student at 50 Hz</text>
+        <text x="957" y="211" class="pn-text">Joint PD loops at 1 kHz</text>
+        <text x="957" y="229" class="pn-text">Zero-shot: no tuning on hardware</text>
+        <line x1="245" y1="66" x2="307" y2="66" class="pn-link" marker-end="url(#pn-arrow)"/>
+        <text x="276" y="56" class="pn-tag" text-anchor="middle">reward</text>
+        <line x1="559" y1="66" x2="621" y2="66" class="pn-link" marker-end="url(#pn-arrow)"/>
+        <text x="590" y="56" class="pn-tag" text-anchor="middle">labels</text>
+        <line x1="873" y1="66" x2="935" y2="66" class="pn-link" marker-end="url(#pn-arrow)"/>
+        <text x="904" y="56" class="pn-tag" text-anchor="middle">deploy</text>
+        <path d="M747.0 244 V270 H119.0 V250" class="pn-link dashed" marker-end="url(#pn-arrow)"/>
+        <text x="433" y="264" class="pn-tag" text-anchor="middle">student rollouts, relabelled by the teacher</text>
+      </svg>
         </div>
-      </div>
+        <div class="filmstrip" role="group" aria-label="The same release in simulation and on hardware, left to right">
+          <span class="fs-label sim-l">Simulation</span>
+          <span class="fs-label real-l">Hardware</span>
+          <img class="sim k1" src="assets/img/method/sim_1.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 1 of 6">
+          <img class="real k1" src="assets/img/method/real_1.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 1 of 6">
+          <img class="sim k2" src="assets/img/method/sim_2.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 2 of 6">
+          <img class="real k2" src="assets/img/method/real_2.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 2 of 6">
+          <img class="sim k3" src="assets/img/method/sim_3.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 3 of 6">
+          <img class="real k3" src="assets/img/method/real_3.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 3 of 6">
+          <img class="sim k4" src="assets/img/method/sim_4.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 4 of 6">
+          <img class="real k4" src="assets/img/method/real_4.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 4 of 6">
+          <img class="sim k5" src="assets/img/method/sim_5.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 5 of 6">
+          <img class="real k5" src="assets/img/method/real_5.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 5 of 6">
+          <img class="sim k6" src="assets/img/method/sim_6.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 6 of 6">
+          <img class="real k6" src="assets/img/method/real_6.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 6 of 6">
+        </div>
+        <figcaption>Top: training and deployment. Bottom: the same release, roll 180° and pitch 45° with the tail, in simulation and in a hardware drop, read left to right.</figcaption>
+      </figure>
     </div>
   </section>
 
@@ -304,7 +437,7 @@
       <div class="replay wide mt-fig" id="replay-app" data-reveal>
         <div class="stage3d" id="stage3d">
           <div class="hud"><span id="hud-left">Hardware log</span><span id="hud-right"><b>0.000 s</b> · 0.00 m fallen</span></div>
-          <div class="hint" id="hint">Drag to orbit · outline: release pose</div>
+          <div class="hint" id="hint">Drag to orbit · outline: release pose · arrows: commanded joint targets</div>
           <noscript><div class="fallback">The 3D replay needs JavaScript.</div></noscript>
         </div>
         <div class="panel">
@@ -419,22 +552,6 @@
       <div class="prose mt-fig" data-reveal>
         <p>Decomposing the score shows that the improvement came mainly from better <strong>alignment between the front and rear segments</strong>. With the tail, the robot less often ended up with one half upright while the body stayed bent or twisted. Its raw scores also varied less from drop to drop (SD 0.090 against 0.155), although this difference was not tested statistically.</p>
       </div>
-    </div>
-  </section>
-
-  <!-- ============ DISCUSSION ============ -->
-  <section class="block page" id="discussion">
-    <div class="grid">
-      <div class="section-head" data-reveal>
-        <p class="eyebrow">Discussion</p>
-        <h2>What the tail is worth</h2>
-      </div>
-      <ul class="takeaways" data-reveal>
-        <li><div><h3>The spine alone already reorients the robot.</h3><p>Averaged over all releases, both configurations were feet-down (mean body tilt below 45°) by 2&nbsp;m of free fall, and the tailed robot already by 1&nbsp;m. From the hardest release, roll 180° without the tail, the average stayed above 45° (about 54° at 2&nbsp;m). Turning feet-down puts the compliant feet, rather than the electronics, toward the landing.</p></div></li>
-        <li><div><h3>The tail's benefit was clearest across roll releases.</h3><p>In the roll sweep the tail raised the adjusted whole-cat score by 0.185 (<i>p</i>&nbsp;=&nbsp;0.0019, Holm 0.0056). In the pitch sweep, where every release was also at 180° roll, the estimate favoured the tail (+0.114) but its confidence interval included zero. The two sweeps were not compared directly.</p></div></li>
-        <li><div><h3>A tail is a trade-off, not a requirement.</h3><p>It adds 0.15&nbsp;kg (8.8% of the no-tail mass), a degree of freedom and an actuator. Whether that is justified depends on the falls a robot expects. Tail length, mass and mass distribution are open design variables we have not yet optimised.</p></div></li>
-      </ul>
-      <p class="note mt-fig" data-reveal>Limitations: the robot was released by hand, so its initial posture and spin varied between drops; the initial whole-cat score and angular speed were recorded and included as covariates. Tail and no-tail drops were not interleaved within a session, and for some releases they were flown on different days, so date and configuration are partly confounded. The whole-cat score was also defined after the drops were flown, so the <i>p</i>-values are best read as exploratory. Replaying the logs shows that 19 of the 37 no-tail drops, including every pitched one, were flown with the with-tail policy (the controller's default at the time); they are kept in the no-tail results, as in the submitted paper. We tested a single tail geometry.</p>
     </div>
   </section>
 

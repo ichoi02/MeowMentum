@@ -52,6 +52,9 @@ PITCH_SWEEP = {(180, 0), (180, 15), (180, 30), (180, 45)}
 
 # Logged columns, in model joint order [rot1, pitch, rot2, tail].
 JOINT_COLUMNS = ["F_M1", "F_M2", "B_M2", "B_M1"]
+# Commanded joint targets in the same order [rot1, pitch, rot2, tail]: the front board
+# receives (roll, pitch), the back board (tail, -roll).
+COMMAND_COLUMNS = ["Cmd_F1", "Cmd_F2", "Cmd_B2", "Cmd_B1"]
 QUAT_COLUMNS = ["F_Q0", "F_Q1", "F_Q2", "F_Q3"]
 
 
@@ -161,6 +164,7 @@ def build_trials(trials):
             "t": r4(time - time[0]),
             "q": r4(quat),
             "j": r4(joints),
+            "c": r4(frame[COMMAND_COLUMNS].to_numpy(float)),
             "tilt": r4(tilt),
         })
     return records
@@ -300,7 +304,7 @@ def build_sim(root):
             obs = u._get_obs()
 
             prev_action = np.zeros(ACT_DIM)
-            quats, rear_quats, joints = [], [], []
+            quats, rear_quats, joints, commands = [], [], [], []
 
             def record():
                 # xquat is only refreshed at the start of mj_step; recompute it so the
@@ -322,16 +326,20 @@ def build_sim(root):
                     action[2] = 0.0
                 prev_action = np.asarray(action, dtype=float).copy()
                 obs, _, terminated, truncated, _ = env.step(action)
+                # target the PD loop tracked during this step, as [roll, pitch, tail]
+                roll_t, pitch_t, tail_t = u.ctrls[-1][:3]
+                commands.append([roll_t, pitch_t, -roll_t, tail_t])
                 done = terminated or truncated
                 record()
 
             quats, joints = np.array(quats), np.array(joints)
+            commands.append(commands[-1])   # the final state has no further command
             tilt = 0.5 * (body_tilt_deg(R.from_quat(quats, scalar_first=True))
                           + body_tilt_deg(R.from_quat(np.array(rear_quats), scalar_first=True)))
             rollouts.append({
                 "morph": variant, "roll": roll, "pitch": pitch,
                 "t": r4(0.02 * np.arange(len(quats))),
-                "q": r4(quats), "j": r4(joints), "tilt": r4(tilt),
+                "q": r4(quats), "j": r4(joints), "c": r4(commands), "tilt": r4(tilt),
             })
         env.close()
     return rollouts
