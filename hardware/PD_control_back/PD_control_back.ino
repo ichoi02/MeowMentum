@@ -1,3 +1,16 @@
+// Back board (Teensy 4.0): joint PD for the tail (M1, 34.014:1) and rot2 (M2, rear spine
+// roll, 9.68:1) through a Pololu VNH5019 dual driver, with quadrature encoders (48 counts
+// per motor revolution). This board has NO IMU: it streams a placeholder quaternion
+// 1,0,0,0 and acc 0 so its telemetry line has the same format as the front board's.
+//
+// Serial protocol (USB, newline-terminated), same as the front board:
+//   host -> board  "m1,m2"      joint targets in rad (tail, rot2)
+//                  RESET        zero both encoders
+//                  START / STOP enable / disable the motor driver
+//                  REBOOT       software reset of the Teensy
+//                  RESET_IMU, RESET_I2C   accepted and ignored (no IMU)
+//   board -> host  every 20 ms: "1.000000,0.000000,0.000000,0.000000,angle1,angle2,0.0000"
+//                  joint angles in rad (tail, rot2)
 #include <Encoder.h>
 #include <cstdio>
 #include <cstring>
@@ -35,16 +48,21 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains = sim pd_nominal * 1024  (sim normalized torque [-1,1] -> PWM [0,1023]).
 // Back M1 = tail: sim (kp=20.0, kd=1.0);  Back M2 = rot2 (roll): sim (kp=4.0, kd=0.4).
-// Tuned by tools/tune_pd_gains.py -- see cat_env.py::pd_nominal for the method.
+// From the step-response sweep in tools/tune_pd_gains.py (see cat_env.py::pd_nominal);
+// the sweep reproduces the pitch/tail pair, the roll pair was kept at Kp 4, Kd 0.4.
 double Kp1 = 20480.0;
 double Kd1 = 1024.0;
 double Kp2 = 4096.0;
 double Kd2 = 409.6;
 
-// If the error is within this many ticks, motor stops
+// Position deadband in rad at the joint (not encoder ticks): while |target - position|
+// is within it the motor is stopped (INA = INB = LOW, PWM 0).
+// MUST match cat_env/env_util.py::MOTOR_DEADBAND.
 float deadband = 0.03;
 // Velocity low-pass gain; MUST match cat_env/env_util.py::VEL_FILTER_ALPHA.
 const double VEL_ALPHA = 0.1;
+// Any nonzero command is floored to minPWM (10-bit PWM, 0..PWM_MAX).
+// MUST match cat_env/env_util.py::MOTOR_MIN_CMD = minPWM / PWM_MAX.
 const int minPWM = 100;
 const int PWM_MAX = 1023;
 
@@ -69,6 +87,8 @@ float velFilt2 = 0;
 uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
+// No IMU on this board: constant placeholders, streamed so the line format matches
+// the front board. The host ignores them.
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
 float acc_mag = 0.0;
 
@@ -223,9 +243,9 @@ static void processSerialLine(char *line) {
     delay(100);
     SCB_AIRCR = 0x05FA0004;
   } else if (strcmp(line, "RESET_IMU") == 0) {
-    
+    // No IMU on this board.
   } else if (strcmp(line, "RESET_I2C") == 0) {
-    
+    // No IMU on this board.
   } else {
     float a, b;
     if (sscanf(line, "%f,%f", &a, &b) == 2) {

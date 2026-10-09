@@ -1,3 +1,17 @@
+// Front board (Teensy 4.0): joint PD for rot1 (M1, front spine roll, 9.68:1) and the
+// spine pitch (M2, 34.014:1) through a Pololu VNH5019 dual driver, quadrature encoders
+// (48 counts per motor revolution), and the BNO085 IMU over I2C.
+//
+// Serial protocol (USB, newline-terminated):
+//   host -> board  "m1,m2"      joint targets in rad (rot1, pitch)
+//                  RESET        zero both encoders
+//                  RESET_IMU    tare the IMU: the current orientation becomes identity
+//                  RESET_I2C    re-initialise the I2C bus and the IMU
+//                  START / STOP enable / disable the motor driver
+//                  REBOOT       software reset of the Teensy
+//   board -> host  every 20 ms: "qr,qi,qj,qk,angle1,angle2,acc"
+//                  game rotation vector (w,x,y,z), joint angles in rad (rot1, pitch),
+//                  accelerometer magnitude in m/s^2 (includes gravity; ~0 in free fall)
 #include <Encoder.h>
 #include <Wire.h>
 #include <Adafruit_BNO08x.h>
@@ -40,16 +54,21 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains = sim pd_nominal * 1024  (sim normalized torque [-1,1] -> PWM [0,1023]).
 // Front M1 = rot1 (roll): sim (kp=4.0, kd=0.4);  Front M2 = pitch: sim (kp=20.0, kd=1.0).
-// Tuned by tools/tune_pd_gains.py -- see cat_env.py::pd_nominal for the method.
+// From the step-response sweep in tools/tune_pd_gains.py (see cat_env.py::pd_nominal);
+// the sweep reproduces the pitch/tail pair, the roll pair was kept at Kp 4, Kd 0.4.
 double Kp1 = 4096.0;
 double Kd1 = 409.6;
 double Kp2 = 20480.0;
 double Kd2 = 1024.0;
 
-// If the error is within this many ticks, motor stops
+// Position deadband in rad at the joint (not encoder ticks): while |target - position|
+// is within it the motor is stopped (INA = INB = LOW, PWM 0).
+// MUST match cat_env/env_util.py::MOTOR_DEADBAND.
 float deadband = 0.03;
 // Velocity low-pass gain; MUST match cat_env/env_util.py::VEL_FILTER_ALPHA.
 const double VEL_ALPHA = 0.1;
+// Any nonzero command is floored to minPWM (10-bit PWM, 0..PWM_MAX).
+// MUST match cat_env/env_util.py::MOTOR_MIN_CMD = minPWM / PWM_MAX.
 const int minPWM = 100;
 const int PWM_MAX = 1023;
 
@@ -74,7 +93,7 @@ float velFilt2 = 0;
 uint32_t lastControlMicros = 0;
 uint32_t lastPrintMillis = 0;
 
-// global IMU
+// Latest IMU readings, streamed with the telemetry line
 float imu_qr = 1.0, imu_qi = 0.0, imu_qj = 0.0, imu_qk = 0.0;
 float acc_mag = 0.0;
 
@@ -334,6 +353,7 @@ static void processSerialLine(char *line) {
     delay(100);
     SCB_AIRCR = 0x05FA0004;
   } else if (strcmp(line, "RESET_IMU") == 0) {
+    // Tare all axes in the game-rotation-vector basis (no magnetometer heading).
     sh2_setTareNow(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z, SH2_TARE_BASIS_GAMING_ROTATION_VECTOR);
   } else if (strcmp(line, "RESET_I2C") == 0) {
     recover_bno08x_from_stall();

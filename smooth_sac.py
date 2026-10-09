@@ -1,61 +1,28 @@
 """SAC with a temporal action-smoothness term in the ACTOR loss.
 
-Replaces the old `w_sm * mean(da^2)` reward penalty (removed from
-cat_env::_get_reward). Same goal -- commands the real geared motors can track --
-but paid for in the policy objective instead of the return:
-
-    L_smooth = || pi_mu(s_{t+1}) - pi_mu(s_t) ||^2
+    L_actor = L_SAC + smooth_coef * || pi_mu(s_{t+1}) - pi_mu(s_t) ||^2
 
 where `pi_mu` is the DETERMINISTIC mean action, tanh(mu), not a sample from the
-squashed Gaussian. Two reasons this matters more than it looks:
+squashed Gaussian. Two reasons this matters:
 
   1. The sampled action carries SAC's exploration noise, which never reaches
-     hardware. Penalizing it prices jitter the deployed policy does not have,
-     and -- because the noise scale is `log_std`, itself a network output --
-     hands the actor a second, degenerate way to satisfy the term: shrink the
-     entropy. That fights the ent_coef auto-tuner directly.
-  2. tanh(mu) is exactly what `predict(deterministic=True)`, the ONNX export and
-     the Teensy run, so the quantity being smoothed is the commanded trajectory
-     itself.
+     hardware. Penalizing it prices jitter the deployed policy does not have, and
+     -- because the noise scale `log_std` is itself a network output -- hands the
+     actor a degenerate way to satisfy the term: shrink the entropy, which fights
+     the ent_coef auto-tuner.
+  2. tanh(mu) is exactly what `predict(deterministic=True)` returns, i.e. the
+     action the student is distilled from, so the quantity being smoothed is the
+     commanded trajectory itself.
 
-Why the actor loss rather than the reward: as a reward penalty, smoothness is
-routed through the critic -- the actor only ever sees it after the TD backup has
-learned it, and it trades against task reward inside the same scalar Q, which is
-what made `w_sm` a collapse risk (a variant that cannot reliably right itself
-scores better holding still; docs/REWARD_TUNING.md). Here the gradient reaches
-the actor directly, on every gradient step, and cannot make passivity look
-optimal to the critic.
+In the actor loss rather than the reward, the term's gradient reaches the actor
+directly on every update instead of being learned by the critic and traded against
+task reward inside Q, where a smoothness penalty can make holding still look optimal.
 
-`smooth_coef` does NOT carry over from `w_sm` -- it acts on the return, not on the
-per-step reward. The default 10.0 is sized to reproduce the pressure `w_sm` used to
-apply, measured on the shipped tail teacher (`cat_controller.zip`):
-
-    ||pi_mu(s_t+1) - pi_mu(s_t)||^2  = 0.204 mean (0.54 p90, 3.74 max)
-    |min_qf_pi|                      = 29.4 mean
-    w_sm's swept grid position       = 6% of task reward per step
-
-    coef = 0.06 * 29.4 / 0.204 ~= 9  ->  10
-
-That equates loss *magnitudes*, not gradient magnitudes, so it was a starting point
-rather than a tuned value -- but it holds up measured. Tail, 1M steps, seed 0, 500
-drops (docs/REWARD_TUNING.md has the full table):
-
-    arm                     success   m_dsm    m_en   m_jv
-    shipped (old w_sm)       57.2%    0.197   0.351   82.0
-    smooth_coef = 10         56.8%    0.0128  0.228   55.5
-    smooth_coef = 0           44.0%   0.277   0.378   66.9
-
-Deleting the penalty and NOT replacing it costs 13.2 pp; this term recovers all of
-it (0.4 pp is inside the ~2.2 pp binomial se) while running 15x smoother than the
-teacher it replaces. Still only one seed per arm, and neither 3 nor 30 was tried.
-
-Note the quantity is not the old `m_sm`: `m_sm` averaged the SAMPLED action delta
-over 3 dims and read ~0.25 at baseline, which is mostly exploration noise -- this
-one sums the deterministic delta over 3 dims and is ~80x smaller at initialization
-(0.003), growing only as the policy learns actual maneuvers. Tune against
-`train/smooth_loss`, logged whether or not the coefficient is zero -- the same
-convention as the env's unweighted `m_*` magnitudes -- and against `m_dsm` from
-`docs/evaluate.py --stats`, which is the same quantity on the deployed policy.
+The released teachers were trained with smooth_coef = 2.0 (the default here and in
+train.py). The term is the squared L2 norm summed over the 3 action dims and averaged
+over the batch. It is logged unweighted as `train/smooth_loss` (also at
+smooth_coef = 0); `evaluate.py --stats` reports the same quantity (m_dsm) for a
+trained policy.
 """
 import numpy as np
 import torch as th
@@ -69,10 +36,10 @@ class SmoothSAC(SAC):
 
     Drop-in for SAC. Checkpoints stay loadable by plain `SAC.load` (the policy is
     unchanged -- only the training objective differs), which is what
-    distillation.py, docs/evaluate.py and onnx_conversion.py rely on.
+    distillation.py, evaluate.py and view_policy.py rely on.
     """
 
-    def __init__(self, *args, smooth_coef: float = 10.0, **kwargs):
+    def __init__(self, *args, smooth_coef: float = 2.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.smooth_coef = smooth_coef
 

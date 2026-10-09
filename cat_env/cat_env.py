@@ -8,108 +8,33 @@ import cat_env.env_util as util
 import mujoco
 import os
 
-# ---- train parameters ----
+_DEFAULT_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model", "cat.xml")
+
+# ---- reward ----
 def _w(name, default):
-    """Reward weight, overridable as CAT_W_<NAME> so a sweep needs no code edit."""
+    """Reward weight, overridable as CAT_W_<NAME> (e.g. CAT_W_AV=0.001) without a code edit."""
     return float(os.environ.get(f"CAT_W_{name}", default))
 
-# Task terms. There is only one: the success BONUS was removed.
+# Per-step reward (see _get_reward), with u = 1 - tilt/pi per body (front f, rear r):
 #
-# It was `w_bonus * 1[both bodies > up_thresh]`, a step at 25.8 deg of tilt -- stricter
-# than the 30 deg that `docs/evaluate.py` actually scores success at, so a policy could
-# succeed by the reported metric while never earning the term meant to encourage it.
-# Worse, it was badly morphology-biased: measured over 200 episodes it fired on 19.3% of
-# tail steps but 5.8% of no-tail steps against a 4.5% PASSIVE rate -- i.e. for no-tail it
-# was statistically indistinguishable from doing nothing, so it carried no gradient for
-# the arm that needed it. Removing it cuts the tail:no-tail asymmetry in task-reward gain
-# from 2.15x to 1.82x.
+#   r = w_pos * (0.5 * (u_f + u_r) + u_f * u_r)
+#       - w_en * m_en - w_av * m_av - w_jv * m_jv - w_time * m_time
 #
-# w_pos is 1.5 rather than 1.0 to restore scale, not to change the balance: dropping the
-# bonus and linearising `up` (see _get_reward) together cut no-tail's reward gain over a
-# passive policy from 0.347/step to 0.248, and 1.4-1.6x puts it back. The penalty weights
-# below are sized against task reward, so leaving w_pos at 1.0 would have quietly made
-# every penalty ~40% more expensive.
-w_pos = _w("POS", 1.5)      # uprightness reward weight
+#   m_en   mean squared applied motor torque (energy)
+#   m_av   mean squared body angular velocity, front + rear gyro
+#   m_jv   mean squared joint velocity
+#   m_time simultaneity of action changes across the 3 channels
+#
+# These defaults reproduce the released teachers (policies/cat_controller{,_notail}.zip,
+# training run "av002"): the task term plus a body angular-velocity penalty only. The
+# same weights are used for both variants, so the ablation compares morphologies under
+# one reward function. In the paper's normalisation (reward divided by 3) the task term
+# is 1/4 (u_f + u_r) + 1/2 u_f u_r and w_av corresponds to ~6.7e-4.
+w_pos = _w("POS", 1.5)      # uprightness (task) weight
 
-# Penalty terms, SHARED BY BOTH VARIANTS. Every one trades directly against w_pos:
-# set too high, a variant that cannot *reliably* right itself scores better holding
-# still than trying, and training collapses to a passive policy instead of a
-# bad-but-trying one.
-#
-# One vector for both arms is a deliberate choice, and it costs something. This is
-# a MORPHOLOGY ablation: if the arms run different rewards, the tail-vs-no-tail gap
-# mixes the tail's physical contribution with a reward-budget difference, which is
-# what the per-variant weights that used to live here did. Identical raw weights
-# make the reward function literally the same; the two robots then spend different
-# FRACTIONS of their task reward on it, and that difference is a consequence of the
-# morphology rather than a confound in the comparison.
-#
-# Found by scaling the previous tail vector by a single factor k and evaluating on
-# fixed release attitudes -- roll 180/90/45/0 at pitch 0, 300 drops each, held-out
-# seed 4242 (docs/shared_k_runs.jsonl). No-tail is the binding arm, so k was chosen
-# on it. Mean success rose monotonically from 47.2% at k=0 to 58.6% at k=1, and k=1
-# is what is below.
-#
-# Two things any future edit should know:
-#
-#   1. The budget is far smaller than the raw numbers suggest, because the grid
-#      that produced them was sized against baselines that no longer hold. Action
-#      smoothness moved into the ACTOR loss (smooth_sac.py), which suppresses
-#      action increments unconditionally, and m_time is quadratic in those -- the
-#      penalty-free no-tail baseline fell from m_time 0.304 to 0.044. This vector
-#      costs the trained no-tail policy ~12% of its task reward, not the ~43% the
-#      same numbers cost when they were tuned. The old collapse ceiling (~18-30%)
-#      was never reached anywhere in the k sweep.
-#   2. The mean over release angles hides a real regression at roll 180. Success
-#      there falls monotonically as k rises -- 24.0% at k=0 to 16.3% at k=1 --
-#      while roll 90 climbs 34.0% to 72.3%. The budget buys success at the easy
-#      attitudes and pays for it upside-down, which is the case a falling-cat
-#      robot arguably exists for. If that matters more than the mean, k=0.25 is
-#      the better pick and this vector is the wrong one.
-#
-# `w_time` IS NOW ZERO for both variants. The simultaneity term is computed on the
-# RAW action (`d_action` in _get_reward), but the per-channel low-pass above now sits
-# between that action and the plant, so raw action rate no longer corresponds to
-# physical joint motion -- the filter absorbs it. The term was therefore pricing a
-# quantity the robot does not feel. The tell showed up immediately on the first
-# filtered teachers: no-tail's `r_time` reached 0.531/step, ~31% of its task reward
-# and 10x the tail's, against ~0.01 on every pre-filter run. Whatever the policy was
-# buying with that spend, it was not smoother hardware motion.
-#
-# If simultaneity is wanted back, price it on something the filter cannot absorb --
-# joint velocity products from `self.data.qvel[6:]` rather than action differences.
-#
-# CURRENT VECTOR: the 3% budget under the exponential pose reward. Re-sized from
-# scratch against that reward's own measured penalty-free baseline (m_en, m_av, m_jv
-# and r_pos over 3 seeds), not carried over -- carrying a vector across a reward change
-# is what previously left it costing 12% of task reward when it had been tuned for 43%.
-#
-# 26 runs, 1M steps each, evaluated on roll 180/90/45/0 x 300 drops at held-out seed
-# 4242 (docs/exp_budget_runs.jsonl). Budget ladder, delta vs penalty-free:
-#
-#   budget     3%     6%    12%    18%    24%    36%
-#   tail    + 6.3  + 5.0  + 2.9  - 0.5  - 6.5  - 9.5
-#   notail  - 3.8  - 4.6  - 5.8  - 7.8  - 3.2  - 3.2
-#
-# NO budget is free. No-tail is degraded at every point, and the damage is NOT
-# proportional to the budget -- 3% costs 3.8 pp and 36% costs 3.2 pp -- so this is a
-# fixed cost of having any penalty at all, not a scale that can be tuned down. 3% is
-# chosen as the cheapest point that still prices torque, joint velocity and body
-# rotation at all; those terms exist for hardware transfer, not for sim score, and
-# penalty-free would leave the commanded trajectory unconstrained.
-#
-# Two things not to over-read:
-#   1. The tail row is single-seed. Penalty-free tail spans 53.7 / 58.7 / 68.8 across
-#      three seeds -- a 15.2 pp spread -- so every tail number above sits inside seed
-#      noise, INCLUDING the +6.3 that makes 3% look best. No-tail is the trustworthy
-#      arm here: its penalty-free spread is 2.0 pp.
-#   2. Inverted righting is nearly gone for no-tail under this reward: roll 180 is
-#      4.9% penalty-free and 0.7% here. It was 2.0% under cos+bonus. That is the case
-#      a falling-cat robot exists for, and no configuration measured so far solves it.
-PENALTY_WEIGHTS = {
-    #        torque      body omega    joint vel      simultaneity
-    "tail":   {"en": 0.03859, "av": 0.002123, "jv": 0.0003087, "time": 0.0},
-    "notail": {"en": 0.03859, "av": 0.002123, "jv": 0.0003087, "time": 0.0},
+PENALTY_WEIGHTS = {   # keys: en, av, jv, time -> w_en, w_av, w_jv, w_time
+    "tail":   {"en": 0.0, "av": 0.002, "jv": 0.0, "time": 0.0},
+    "notail": {"en": 0.0, "av": 0.002, "jv": 0.0, "time": 0.0},
 }
 
 init_ang_vel_max = 0.5  # rad/s, per-axis range for random initial tumble
@@ -117,42 +42,23 @@ init_joint_pos_max = 0.2  # rad, per-joint range for random initial joint angles
 init_pitch_max_deg = 45.0  # deg, release pitch range (roll is full; yaw is irrelevant)
 
 # Per-channel first-order low-pass on the NORMALIZED action, applied before the
-# joint-range mapping. Order matches the action vector: [roll, pitch, tail].
+# joint-range mapping; mirrored by FILTER_ALPHA in hardware/controller.py.
 #
-# Sized against measured hardware, not chosen by feel. Over 7 logged drops the
-# unfiltered policy commanded 69 rad of roll travel per 0.74 s episode while the joint
-# physically delivered 6.9 -- a factor of 10. One alpha cannot fix that without
-# over-damping pitch: roll runs +-7.28 rad through 9.68:1 gearing, pitch +-1.57 rad
-# through 34:1, so in range-units roll is far slower. Applying each candidate alpha to
-# the logged action sequence gives commanded/achievable travel of:
+# Sized against hardware logs: run unfiltered, the policy commanded ~10x the roll travel
+# the roll joint (+-7.28 rad through 9.68:1 gearing) actually delivered, and ~2.1x on
+# pitch (+-1.57 rad through 34:1). Replaying the logged actions through these alphas
+# brings that to 1.7x (roll, 0.1) and 0.9x (pitch, 0.3). Tail follows roll: it shares
+# pitch's gearing but has a wider range, and it is zeroed for the no-tail variant.
 #
-#         alpha    roll     pitch
-#         1.00     10.0x     2.1x     (what actually flew)
-#         0.30      4.0x     0.9x
-#         0.10      1.7x     0.5x
-#
-# Hence 0.3 on pitch and 0.1 on roll/tail. Tail follows roll rather than pitch because
-# it shares pitch's gearing but a wider range, and because on the no-tail variant it is
-# zeroed outright (see hardware/controller.py).
-#
-# This is state: it persists across steps within an episode and resets per episode, so
-# the plant the policy acts on is no longer memoryless. The student observation carries
-# the previous action for exactly this reason (distillation.py) -- without it the
-# filter state is unobservable and the student's problem stops being Markov.
+# The filter state persists within an episode, which is why the student observation
+# includes the previous action (distillation.py).
 filter_alpha = np.array([0.1, 0.3, 0.1])  # [roll, pitch, tail]
 # --------------------------
 
 # ---- privileged (teacher-only) domain-randomization block ----
-# The teacher is a privileged policy: it may see things no sensor measures. The
-# per-episode DR draw is exactly that -- the student cannot read its own rotor
-# inertia, but it CAN infer it from how the joints responded over the last few
-# frames, which is what distillation forces it to learn. Handing the teacher the
-# true draw means it no longer has to infer the plant from the same 25 numbers it
-# uses to act, so its labels are the actions of a policy that *knows* the robot.
-#
-# Appended at the END of the observation so every existing index is unchanged --
-# distillation.py's student slices (front gravity 0:3, joint angles 12:16) and
-# the hardware obs layout keep working untouched.
+# The teacher also observes this episode's DR draw. It is appended after the 25-dim
+# base observation, so the student's slices of the base block (distillation.py) and
+# the hardware observation layout are unaffected.
 #
 # Layout (all bodies below exclude the world body, index 0; 5 real bodies):
 #   [ 0: 5]  body mass multipliers
@@ -160,14 +66,11 @@ filter_alpha = np.array([0.1, 0.3, 0.1])  # [roll, pitch, tail]
 #   [20:35]  body inertia multipliers, xyz
 #   [35:47]  per motor GROUP (2) x [damping, armature, friction, ctrlrange, kp, kd]
 #   [   47]  action delay
-# Both model variants have the same 6 bodies / 4 joints / 2 motor groups, so this
-# width is identical for tail and no-tail.
+# Both model variants have the same bodies, joints and motor groups, so the width is
+# identical for tail and no-tail.
 #
 # Every entry is normalized to put nominal at exactly 0 and the sampled range at
-# about [-1, 1]. Raw multipliers would hand SAC a block of inputs sitting at 1.0
-# with 1e-3-scale variation (armature is 1.5e-4 Nm.s^2 nominal), which the first
-# layer resolves about as poorly as it resolves the frame differences the student
-# stacker exists to avoid.
+# about [-1, 1], rather than handing the network raw multipliers near 1.0.
 DR_DIM = 48 # domain randomization vector width, teacher-only; see above
 BASE_OBS_DIM = 25
 
@@ -179,11 +82,10 @@ def _dr_scale(x, half_range, center=1.0):
 class CatEnv(MujocoEnv, EzPickle):
     metadata = {"render_modes": ["human", "rgb_array", "depth_array"], "render_fps": 50}
 
-    def __init__(self, model_path="model/cat.xml", render_mode=None, privileged=True):
+    def __init__(self, model_path=_DEFAULT_MODEL, render_mode=None, privileged=True):
         model_path = os.path.abspath(model_path)
 
-        # privileged=False reproduces the old 25-dim observation, so teachers
-        # trained before the DR block was added still load and evaluate.
+        # privileged=False gives the 25-dim base observation without the DR block.
         self.privileged = privileged
         self._dr_vec = np.zeros(DR_DIM)
         obs_dim = BASE_OBS_DIM + (DR_DIM if privileged else 0)
@@ -202,15 +104,15 @@ class CatEnv(MujocoEnv, EzPickle):
         self.action_space = action_space
         EzPickle.__init__(self, model_path=model_path, render_mode=render_mode,
                           privileged=privileged)
-        
+
         # Cache objects
         self._body_idx = {}
         self._joint_qpos_idx = {}
         self._joint_qvel_idx = {}
-        
+
         for name in ["front_body", "rear_body", "spine_1", "spine_2", "tail"]:
             self._body_idx[name] = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-            
+
         self._joint_id = {}
         self._actuator_idx = {}
         for name in ["rot1", "pitch", "rot2", "tail"]:
@@ -221,17 +123,13 @@ class CatEnv(MujocoEnv, EzPickle):
             self._actuator_idx[name] = int(np.flatnonzero(self.model.actuator_trnid[:, 0] == jid)[0])
 
         # Motor groups: joints driven by the SAME motor + gearbox type. rot1/rot2 are
-        # both the 9.68:1 roll motor; pitch/tail are both the 34.014:1 motor. The
-        # randomization multipliers below (damping, armature, friction, ctrlrange, PD
-        # gain) all model properties of the motor/gearbox -- rotor inertia, gear
-        # friction, stall torque, torque constant -- so identical hardware must draw
-        # ONE multiplier per group, not one per joint. Drawing them independently
-        # would let training see a robot whose two roll motors behave differently,
-        # which the real robot never does, and would wash out the shared-parameter
-        # error the policy actually has to survive.
+        # both the 9.68:1 roll motor; pitch/tail are both the 34.014:1 motor. The motor
+        # randomization (damping, armature, friction, ctrlrange, PD gain) models
+        # properties of the motor/gearbox, so it draws ONE multiplier per group, not
+        # one per joint: the real robot's two roll motors do not behave differently.
         self._motor_groups = (("rot1", "rot2"), ("pitch", "tail"))
 
-        # Cache nomical physics parameters
+        # Nominal physics parameters; the per-episode DR scales these.
         self.nominal_mass = self.model.body_mass.copy()
         self.nominal_damping = self.model.dof_damping.copy()
         self.nominal_ipos = self.model.body_ipos.copy()
@@ -242,44 +140,26 @@ class CatEnv(MujocoEnv, EzPickle):
 
         # Initialize variables
         self.steps = 0
-        # 50 steps x 20 ms = 1.0 s. Raised from 37 (0.74 s) because the drop was
-        # ending mid-manoeuvre: released inverted, the no-tail teacher was still
-        # righting at 119 deg/s when the episode was truncated, finishing at 50 deg
-        # against a 30 deg threshold -- it needed roughly another 0.17 s. This is a
-        # taller drop, so hardware/controller.py::CONTROL_DURATION moves with it.
+        # 50 steps x 20 ms = 1.0 s per drop; hardware/controller.py::CONTROL_DURATION
+        # matches it.
         self.max_steps = 50
         self.prev_action = np.zeros(self.action_space.shape, dtype=np.float32)
 
         # Per-joint PD gains. Order: [rot1, pitch, rot2, tail].
         # kp*(err) - kd*filtered_vel -> normalized [-1,1].
         #
-        # Set by tools/tune_pd_gains.py: a real step response through this exact
-        # control path (PD -> deadband + minimum-PWM floor -> ctrlrange -> 1 ms
-        # mj_step) on the free-floating robot, taking the fastest settling time among
-        # gains that show no overshoot and no limit cycle *in the worst case over the
-        # domain-randomization range*, not merely at nominal -- the armature spread
-        # alone is 6x, and gains that look critically damped at nominal ring inside
-        # it. Settling (90th pct over DR, worst of 3 seeds): roll 0.432 s,
-        # pitch 0.245 s, tail 0.246 s. Retuned after the tail mass went 172 -> 150 g:
-        # the lighter tail made the previous (40, 2.0) overshoot past the gate on
-        # both pitch and tail, and halving to (20, 1.0) is fractionally faster as
-        # well as cleaner -- worth re-running the tuner after any inertia edit.
+        # Set by tools/tune_pd_gains.py: a step response through this exact control
+        # path (PD -> deadband + minimum-PWM floor -> ctrlrange -> 1 ms mj_step) on the
+        # free-floating robot, taking the fastest settling among gains with no
+        # overshoot and no limit cycle in the WORST case over the DR range, not just at
+        # nominal (the armature spread alone is 6x). Re-run the tuner after any
+        # inertia edit.
         #
-        # The roll pair is damped harder than a noise-free model would ask for. With
-        # exact qvel, kd = 0.2 looks clean; once the PD differentiates the real 48 CPR
-        # encoder (13.5 mrad at the roll joint, only 2.2 ticks across the deadband) it
-        # is visibly under-damped -- 6.2% overshoot at the 95th percentile, 2 velocity
-        # sign changes, and 3 of 256 DR draws never settling. kd = 0.4 removes all of
-        # that. kp = 4 is then the fastest roll pair that still passes every gate
-        # on every seed; kp = 5 settles 17% quicker but overshoots 2.8% at p95 and
-        # leaves a draw unsettled.
-        #
-        # rot1/rot2 must share gains: the policy drives rot2 as -rot1, so asymmetric
-        # roll gains would turn the counter-twist into a net torque. The roll pair is
-        # unchanged by the sweep -- it is torque-limited, not gain-limited (0.17 Nm
-        # against the body inertia), so raising kp only saturates sooner. pitch and
-        # pitch and tail share a gain pair because their step responses land within
-        # 1% of each other, not because they must.
+        # The roll pair uses kd = 0.4 rather than 0.2 because the PD differentiates the
+        # quantized 48 CPR encoder, which leaves kd = 0.2 under-damped. rot1/rot2 must
+        # share gains: the policy drives rot2 as -rot1, so asymmetric roll gains would
+        # turn the counter-twist into a net torque. Pitch and tail share a gain pair
+        # because their step responses land within 1% of each other.
         self.pd_nominal = [(4.0, 0.4), (20.0, 1.0), (4.0, 0.4), (20.0, 1.0)]
         self.joint_names = ("rot1", "pitch", "rot2", "tail")
         # Each controller carries its own encoder resolution, so the inner loop
@@ -289,11 +169,8 @@ class CatEnv(MujocoEnv, EzPickle):
                                      dt=self.model.opt.timestep)
                    for (kp, kd), name in zip(self.pd_nominal, self.joint_names)]
 
-        # Penalty weights are per-instance and per-variant: a variant with less
-        # authority reaches the passive optimum at a lower budget, and at the
-        # tailed weights the no-tail robot collapses outright (6.6% success,
-        # 91 deg tilt -- docs/REWARD_TUNING.md). CAT_W_* still overrides, so a
-        # sweep needs no code edit.
+        # Penalty weights for this model's variant, each overridable by
+        # CAT_W_EN / CAT_W_AV / CAT_W_JV / CAT_W_TIME.
         variant = "notail" if "notail" in os.path.basename(model_path) else "tail"
         w = PENALTY_WEIGHTS[variant]
         self.w_en = _w("EN", w["en"])
@@ -305,7 +182,7 @@ class CatEnv(MujocoEnv, EzPickle):
 
     def step(self, action):
         self.steps += 1
-        
+
         action = np.clip(action, -1, 1)
 
         # Random delay
@@ -330,7 +207,7 @@ class CatEnv(MujocoEnv, EzPickle):
         executed_action[0] = util.map_value(executed_action[0], -1, 1, -roll_range, roll_range) # roll
         executed_action[1] = util.map_value(executed_action[1], -1, 1, -pitch_range, pitch_range) # pitch
         executed_action[2] = util.map_value(executed_action[2], -1, 1, -tail_range, tail_range) # tail
-        
+
         # Joint targets in actuator order; rot2 counter-twists rot1.
         targets = (executed_action[0], executed_action[1],
                    -executed_action[0], executed_action[2])
@@ -355,17 +232,16 @@ class CatEnv(MujocoEnv, EzPickle):
             for i in range(4):
                 ctrl_min, ctrl_max = self.model.actuator_ctrlrange[i]
                 physical_torque[i] = util.map_value(norm_torque[i], -1.0, 1.0, ctrl_min, ctrl_max)
-            
+
             # Apply to MuJoCo and advance physics by exactly 1 ms
             self.data.ctrl[:] = physical_torque
             mujoco.mj_step(self.model, self.data)
 
         self.ctrls.append(np.hstack([executed_action, self.data.qpos[7:]]))
-        # self.ctrls.append(physical_torque)
         observation = self._get_obs()
         reward, reward_info = self._get_reward(action)
-        info = reward_info 
-        
+        info = reward_info
+
         terminated = self._is_terminated()
         truncated = self._is_truncated()
 
@@ -381,18 +257,16 @@ class CatEnv(MujocoEnv, EzPickle):
         self.prev_action = np.zeros(self.action_space.shape, dtype=np.float32)
         # Per-episode command log: rows of [mapped target (roll, pitch, tail),
         # joint qpos (4)]. Cleared here rather than at episode end so the finished
-        # episode stays readable -- plots/plot_joint_tracking.py reads it.
+        # episode stays readable (e.g. for plotting joint tracking).
         self.ctrls = []
-        # print("---")
         # Domain randomization
         # Mass
         mass_noise = np.random.uniform(0.8, 1.2, size=self.nominal_mass.shape)
         self.model.body_mass[:] = self.nominal_mass * mass_noise
 
-        # Motor/gearbox parameters. One draw per motor GROUP (see _motor_groups):
-        # the two roll joints are the same motor, as are pitch and tail, so their
-        # multipliers are shared. Start from nominal so the root free-joint dofs
-        # (which no motor drives) stay untouched.
+        # Motor/gearbox parameters. One draw per motor GROUP (see _motor_groups).
+        # Start from nominal so the root free-joint dofs (which no motor drives)
+        # stay untouched.
         self.model.dof_damping[:] = self.nominal_damping
         self.model.dof_armature[:] = self.nominal_armature
         self.model.dof_frictionloss[:] = self.nominal_frictionloss
@@ -403,26 +277,24 @@ class CatEnv(MujocoEnv, EzPickle):
             # Damping is a nominal estimate (from motor no-load speed / stall torque),
             # so randomize it wider (+/-30%) than the other params.
             damping_noise = np.random.uniform(0.7, 1.3)
-            # Armature is reflected rotor inertia estimated from motor class (no datasheet
-            # rotor inertia). It is a pure estimate, so randomize it log-symmetrically
-            # over ~2.5x either way rather than the narrower band the other params use.
+            # Armature is reflected rotor inertia estimated from the motor class (no
+            # datasheet value), so it gets the widest range: 0.4-2.5x, symmetric in
+            # log space (0.4 = 1/2.5). The draw itself is uniform.
             armature_noise = np.random.uniform(0.4, 2.5)
             friction_noise = np.random.uniform(0.7, 1.3)
             # Actuator authority. ctrlrange encodes stall torque, which moves with LiPo
             # sag across the drop, motor temperature and unit-to-unit spread. Scaling
             # both limits keeps the range symmetric, so this is a pure torque scale.
             ctrlrange_noise = np.random.uniform(0.8, 1.2)
-            # PD gains. The flashed inner-loop gains equal pd_nominal by construction,
-            # but the PWM -> physical torque constant they act through is not measured,
-            # so the effective closed-loop gain still carries real uncertainty. That
-            # constant is a property of the motor, hence also per-group.
+            # PD gains. The flashed inner-loop gains equal pd_nominal, but the
+            # PWM -> torque constant they act through is not measured, so the
+            # effective closed-loop gain is uncertain. Also a motor property, hence
+            # per group.
             kp_noise = np.random.uniform(0.8, 1.2)
             kd_noise = np.random.uniform(0.8, 1.2)
 
-            # Armature is the one draw that is log-uniform-ish rather than a narrow
-            # band around 1 (0.4 = 1/2.5), so it is normalized in log space; a linear
-            # scaling would put nominal at -0.6 instead of 0 and squash the whole
-            # lower half of the range into a fifth of the axis.
+            # Armature's range is symmetric in log space, so it is normalized in log
+            # space; a linear min-max scaling would put nominal at about -0.43 instead of 0.
             dr_motor.extend([
                 _dr_scale(damping_noise, 0.3),
                 np.log(armature_noise) / np.log(2.5),
@@ -462,8 +334,7 @@ class CatEnv(MujocoEnv, EzPickle):
         self.action_filt = np.zeros(self.action_space.shape, dtype=np.float64)
 
         # Freeze this episode's draw as the privileged block of the observation.
-        # Constant for the whole episode by construction -- the DR is resampled
-        # only here -- so the teacher reads the same 48 numbers every step.
+        # The DR is resampled only here, so the block is constant within an episode.
         self._dr_vec = np.concatenate([
             _dr_scale(mass_noise[1:], 0.2),
             (ipos_noise[1:] / 0.04).ravel(),
@@ -480,34 +351,22 @@ class CatEnv(MujocoEnv, EzPickle):
         qpos = self.init_qpos.copy()
         qvel = self.init_qvel.copy()
 
-        # Randomize initial orientation: FULL roll, but pitch only within +-45 deg.
-        #
-        # This is the release the robot is actually given -- held by hand, rolled to
-        # some angle about its long axis, and let go roughly level fore-aft. A uniform
-        # SO(3) draw (the previous behaviour) spends most of its mass on nose-up /
-        # nose-down attitudes that never occur in a drop test, so the policy was
-        # spending capacity on a distribution it is never evaluated or deployed in.
-        #
-        # Yaw is fixed at 0 rather than sampled: the observation is projected gravity
-        # and the reward is a tilt angle, both invariant to heading, so a yaw draw adds
-        # nothing but variance. Euler order matches docs/evaluate.py::force_attitude,
-        # so `--roll X` there lands exactly on this distribution.
+        # Release attitude: full roll, pitch within +-45 deg, as in a hand drop
+        # (rolled about the long axis, roughly level fore-aft). Yaw is fixed at 0: the
+        # observation and reward are yaw-invariant. The Euler order matches
+        # evaluate.py::force_attitude and view_policy.py, so --roll/--pitch there land
+        # on this distribution.
         roll_deg = np.random.uniform(-180.0, 180.0)
         pitch_deg = np.random.uniform(-init_pitch_max_deg, init_pitch_max_deg)
         quat_xyzw = R.from_euler("xyz", [roll_deg, pitch_deg, 0.0], degrees=True).as_quat()
         qpos[3:7] = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
 
-        # Randomize initial angular velocity: the robot is dropped already tumbling.
-        # Root free-joint angular velocity lives in qvel[3:6]. This is what puts
-        # nonzero angular momentum in the episode -- contact is disabled, so L is
-        # conserved throughout, and at exactly 0 the policy would only ever see the
-        # (easier, and unreachable on a real release) zero-momentum problem.
+        # Initial tumble: root free-joint angular velocity lives in qvel[3:6]. Contact
+        # is disabled, so the resulting angular momentum is conserved for the episode.
         qvel[3:6] = np.random.uniform(-init_ang_vel_max, init_ang_vel_max, size=3)
 
-        # Randomize initial joint angles: the release pose is never exactly the
-        # nominal home pose (servo zero offset, backlash, hand placement), so the
-        # policy must not assume it starts folded exactly at zero. Clipped to each
-        # joint's limits so no episode starts outside its range.
+        # Initial joint angles: the release pose is never exactly the nominal home pose
+        # (zero offsets, backlash, hand placement). Clipped to each joint's limits.
         joint_noise = np.random.uniform(-init_joint_pos_max, init_joint_pos_max,
                                         size=len(self.joint_names))
         for name, noise in zip(self.joint_names, joint_noise):
@@ -522,7 +381,7 @@ class CatEnv(MujocoEnv, EzPickle):
         # read as a large first-sample velocity.
         for pd, name in zip(self.pd, self.joint_names):
             pd.reset(self.data.qpos[self._joint_qpos_idx[name]])
-        
+
         return self._get_obs()
 
     def _body_gyro(self, name):
@@ -563,14 +422,13 @@ class CatEnv(MujocoEnv, EzPickle):
             ctrl, step
         ])
 
-        # Privileged tail: this episode's domain-randomization draw. Teacher-only
-        # by construction -- the student's obs is built from slices of the block
-        # above (distillation.py), so nothing downstream of distillation ever sees
-        # it, and it must stay LAST so those slice indices never move.
+        # Privileged tail: this episode's domain-randomization draw. The student's obs
+        # is built from slices of the block above (distillation.py), so it never sees
+        # this, and it must stay LAST so those slice indices never move.
         if self.privileged:
             obs = np.concatenate([obs, self._dr_vec])
         return obs.astype(np.float32)
-    
+
     def _get_reward(self, action):
         front_quat = self.data.xquat[self._body_idx["front_body"]]
         rear_quat = self.data.xquat[self._body_idx["rear_body"]]
@@ -579,88 +437,41 @@ class CatEnv(MujocoEnv, EzPickle):
         front_up = R.from_quat(front_quat, scalar_first=True).apply([0, 0, 1])
         rear_up = R.from_quat(rear_quat, scalar_first=True).apply([0, 0, 1])
 
-        # Per-body uprightness, LINEAR in tilt angle: 1 at upright, 0 at inverted, with
-        # a constant gradient of 1/pi everywhere.
-        #
-        # The clip is load-bearing: `apply` routinely returns 1.0 + 1e-16, and arccos
-        # of that is NaN, which would silently poison a whole episode's reward.
-        #
-        # Shapes measured, teacher mean success over roll 180/90/45/0, 300 drops each at
-        # held-out seed 4242, all under the OLD uniform-SO(3) release (tail / no-tail):
-        #
-        #   0.5*(cos(tilt)+1) + step bonus, penalties on   63.5% / 35.8%
-        #   1 - tilt/pi, no bonus, penalties on            47.8% / 32.3%
-        #   1 - tilt/pi, no bonus, penalties OFF           56.6% / 36.9%
-        #   exp(-tilt), no bonus, penalties OFF (3 seeds)  60.4% / 39.2%
-        #   exp(-tilt), no bonus, 3% budget                66.7% / 35.3%
-        #
-        # Gradient is what distinguishes them. cos gives 0.5*sin(tilt), which VANISHES at
-        # both ends (0.04 at 5 deg and at 175 deg, against 0.50 at 90 deg) -- flattest
-        # exactly where the policy is stuck. Linear gives a constant 1/pi. exp(-k*tilt)
-        # gives k*exp(-k*tilt): 1.00 at 0 deg and 0.59 at 30 deg for k=1, against linear's
-        # 0.32, but only 0.21 at 90 deg and 0.04 at 180 deg.
-        #
-        # Two things the search established and this file should not lose:
-        #   - Offline scoring of a shape on FIXED trajectories does not predict what it
-        #     TRAINS. It called linear roughly neutral; linear trained 15.7 pp worse on
-        #     the tail. Shapes are compared by training runs here, not by analysis.
-        #   - Steepening near upright amplifies the morphology asymmetry, because
-        #     reaching upright is exactly what no-tail cannot do. Scored on real
-        #     trajectories the tail:no-tail gain ratio runs 1.82x (cos), 1.90x (linear),
-        #     2.33x (exp k=1), 2.87x (exp k=2). It is the same bias the deleted step
-        #     bonus had, just smoothed.
+        # Per-body uprightness, LINEAR in tilt angle: 1 at upright, 0 at inverted.
+        # The clip is load-bearing: `apply` can return 1.0 + 1e-16, and arccos of that
+        # is NaN.
         up_f = 1.0 - np.arccos(np.clip(front_up[2], -1.0, 1.0)) / np.pi
         up_r = 1.0 - np.arccos(np.clip(rear_up[2], -1.0, 1.0)) / np.pi
 
-        # Dense, per-step, NO time ramp: every upright step counts, so under the SAC
-        # discount (gamma < 1) the optimal policy rights ASAP and holds. The sum term
-        # gives each body an independent gradient (no vanishing when the other is
-        # inverted); the product term rewards true "both upright" simultaneously.
+        # Dense, per-step, no time ramp: every upright step counts, so under the SAC
+        # discount the optimal policy rights as early as possible and holds. The sum
+        # term gives each body an independent gradient (no vanishing when the other is
+        # inverted); the product term rewards both being upright together.
         r_pos = w_pos * (0.5 * (up_f + up_r) + up_f * up_r)
 
         # --- penalty magnitudes, unweighted ---
-        # Each is the raw physical quantity the matching weight prices. They are
-        # reported in `info` as m_* alongside the weighted r_*, because the tuning
-        # question ("did raising w_jv actually reduce joint velocity, and by how
-        # much?") is about the magnitude, not the reward it contributes -- and the
-        # weighted term is uninformative at w = 0. docs/evaluate.py --stats reads
-        # these; keeping the definition here means the tuning instrument cannot
-        # drift from what the reward actually optimizes.
+        # Reported in `info` as m_* alongside the weighted r_*, so the quantity a
+        # weight prices stays visible even when the weight is 0 (evaluate.py --stats).
+        # Action smoothness is not a reward term: it lives in the SAC actor loss
+        # (smooth_sac.py). d_action is used only by m_time.
         d_action = np.abs(action - self.prev_action)
 
         # Applied torque: energy.
         m_en = np.mean(self.data.ctrl ** 2)
 
-        # NOTE: the action-rate term (`w_sm * mean(d_action ** 2)`) used to sit
-        # here. It is now an actor-loss term on the DETERMINISTIC mean action --
-        # see smooth_sac.py -- so the quantity smoothed is the commanded
-        # trajectory rather than the exploration-noised action the buffer holds.
-        # d_action survives because m_time still needs it.
-
-        # Body angular velocity: an upright pose reached while still tumbling is not
-        # a landing. Contact is disabled and angular momentum is conserved, so the
-        # policy cannot shed omega -- it can only park the *bodies* still by putting
-        # the residual rotation into the joints. This term asks for exactly that.
-        # It opposes the maneuver itself (reorienting at zero momentum REQUIRES the
-        # bodies to rotate), so it is the term most likely to cause a passive
-        # collapse and is weighted accordingly.
+        # Body angular velocity: an upright pose reached while still tumbling is not a
+        # landing. Angular momentum is conserved mid-air, so the policy can only park
+        # the bodies by moving the residual rotation into the joints.
         omega = np.concatenate([self._body_gyro("front_body"), self._body_gyro("rear_body")])
         m_av = np.mean(omega ** 2)
 
-        # Joint velocity: suppress motion that does not buy reorientation -- flailing
-        # inside the joint limits, and the fast reversals that a real geared motor
-        # cannot track. Penalizing velocity rather than the commanded rate (which
-        # the actor-loss smoothness term now covers) catches motion the PD loop
-        # produces on its own, e.g. ringing after a step.
+        # Joint velocity: flailing and fast reversals a geared motor cannot track.
         m_jv = np.mean(self.data.qvel[6:] ** 2)
 
-        # Timing: penalize the three channels moving AT THE SAME TIME. The pairwise
-        # product is zero whenever only one channel is moving and grows only when two
-        # or more move together, so a sequential roll -> pitch -> tail maneuver is
-        # free while a simultaneous one is not. This is a sim2real term: coupled
-        # multi-joint motion is where the model is least trustworthy (unmodeled
-        # spine flex, shared battery sag across four motors at once), whereas a
-        # step-by-step maneuver moves through states the sim gets right.
+        # Simultaneity: pairwise products of the per-channel action change, zero
+        # whenever at most one channel moves. It is computed on the raw action,
+        # upstream of the action low-pass, so it does not measure physical joint
+        # motion; its default weight is 0.
         m_time = (d_action[0] * d_action[1] + d_action[0] * d_action[2]
                   + d_action[1] * d_action[2])
 
@@ -682,7 +493,7 @@ class CatEnv(MujocoEnv, EzPickle):
         }
 
         return final_reward, reward_info
-    
+
     def _is_terminated(self):
         return False
 

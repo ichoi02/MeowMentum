@@ -1,3 +1,13 @@
+"""Stage 2: distill the privileged teacher into the deployable student with DAgger.
+
+    python distillation.py --variant tail      # teacher: policies/cat_controller.zip
+    python distillation.py --variant notail    # teacher: policies/cat_controller_notail.zip
+
+Saves policies/student_policy<suffix><tag>_<timestamp>.pth; copy it to
+policies/student_policy<suffix>.pth before exporting with onnx_conversion.py. The
+student-observation helpers here are shared by evaluate.py, view_policy.py and
+hardware/e2e_test.py.
+"""
 import numpy as np
 import gymnasium as gym
 import torch
@@ -12,14 +22,6 @@ from cat_env.cat_env import BASE_OBS_DIM
 import os
 import time
 from variants import VARIANTS, policy_dir, teacher_path
-
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-print(f"Using device: {device}")
 
 # Full obs layout (see cat_env/cat_env.py::_get_obs; 73-dim, yaw-invariant):
 #   [0:3]    front_proj_grav   (front-body gravity direction; front IMU on real robot)
@@ -53,26 +55,17 @@ FRAME_DIM = GRAV_DIM + JOINT_DIM        # single-timestep kinematic features (7)
 #   [7:10]   previous action (normalized, pre-filter -- what the policy last commanded)
 #   [10]     step / max_steps
 #
-# Replaces the old 2-frame difference stack. Two reasons the previous action has to be
-# here: the action low-pass in cat_env.step is persistent state, so without the command
-# history the filter's position is unobservable and the student's problem is not Markov;
-# and the teacher has always seen `step` (cat_env::_get_obs), so including it closes a
-# teacher/student asymmetry rather than inventing a new signal.
-#
-# The trade this makes: the frame differences were the only velocity cue the student
-# had, and they were measured to be well inside the sim's distribution on hardware
-# (d_grav 0.87-0.98x sim sd, 1-5% out of support -- telemetry/sim2real.ipynb). Dropping
-# them is a deliberate choice to rely on the previous action instead; if the student
-# regresses relative to its teacher, this is the first thing to revisit.
+# The previous action is needed because the action low-pass in cat_env.step is
+# persistent state: without the command history the filter's position is unobservable
+# and the student's problem is not Markov. `step` is also in the teacher's observation
+# (cat_env::_get_obs). There is no velocity input.
 STUDENT_OBS_DIM = FRAME_DIM + ACT_DIM + 1   # 11
 
-# Zero the tail channel for the no-tail variant. `cat_notail.xml` does not remove the
-# tail joint, it starves the motor to ctrlrange +-1e-6, so `action[2]` is inert in
+# Zero the tail joint reading for the no-tail variant. `cat_notail.xml` does not remove
+# the tail joint, it starves the motor to ctrlrange +-1e-6, so `action[2]` is inert in
 # training and the policy gets no gradient on it. On hardware the same channel is wired
-# to a real +-110 deg motor, which drove `q_tail`/`dq_tail` 76%/81% outside the
-# distribution the student was distilled on. Forcing the tail to zero in BOTH the sim
-# frame and hardware/controller.py keeps the two identical -- pinning only the hardware
-# would leave it at the mode of the sim's distribution rather than matching it.
+# to a real +-110 deg motor, so the tail angle is forced to zero in BOTH the sim frame
+# (here) and hardware/controller.py to keep the two observations identical.
 TAIL_JOINT_IDX = 3
 
 
@@ -92,9 +85,6 @@ def build_student_obs(frame, prev_action, step_frac):
     return np.concatenate([frame, np.asarray(prev_action, dtype=float).ravel(),
                            [float(step_frac)]])
 
-
-# --- legacy, kept so telemetry/sim2real.ipynb can still parse the pre-redesign logs ---
-N_FRAMES = 2                            # frames the OLD stacked observation used
 
 def sample_sensor_bias(grav_bias_std=0.035, joint_bias_std=0.02):
     """Constant per-drop sensor offsets, drawn once per episode.
@@ -124,32 +114,6 @@ def get_noisy_student_frame(full_obs, bias, grav_noise_std=0.02, joint_noise_std
     noisy_joints = util.add_gaussian_noise(joint_angles + bias["joint"], joint_noise_std)
 
     return np.concatenate([noisy_grav, noisy_joints])
-
-def stack_frames(frames):
-    """LEGACY -- the pre-redesign stacked observation. Not used by the current student.
-
-    Kept because telemetry/sim2real.ipynb rebuilds the observations of the drops that
-    were flown with the 14-dim policy, and those logs are only interpretable through
-    the layout that produced them.
-
-    Newest frame plus successive backward DIFFERENCES, grouped by feature type.
-
-    With the default 2 frames the layout is [current, current - previous] rather
-    than [previous, current]: the same 14 numbers and the same information, but the
-    velocity-like part is handed over directly instead of leaving the network to
-    subtract two nearly-equal inputs itself. The two raw frames differ by ~1 part in
-    100 over a 20 ms step, so their difference is a small signal riding on a large
-    common-mode term -- exactly the thing a first layer resolves poorly and that
-    per-frame sensor noise swamps.
-
-    Layout for N=2: [grav(3), d_grav(3), joints(4), d_joints(4)].
-    """
-    seq = list(frames)                                    # oldest -> newest
-    deltas = [seq[i] - seq[i - 1] for i in range(len(seq) - 1, 0, -1)]
-    parts = [seq[-1]] + deltas
-    gravs = [p[:GRAV_DIM] for p in parts]
-    joints = [p[GRAV_DIM:] for p in parts]
-    return np.concatenate(gravs + joints)
 
 # ---- 1. Define the Student Policy ----
 class StudentPolicy(nn.Module):
@@ -214,7 +178,13 @@ def collect_data(env, student_policy, expert_policy, num_steps, is_student_actin
         else:
             act_action = exp_action
 
-        # 5. Step the environment
+        # 5. Step the environment. prev_action is the raw action, tail channel
+        #    included. For the no-tail variant this differs from deployment:
+        #    hardware/controller.py (and evaluate.py, view_policy.py) zero action[2]
+        #    before feeding it back, so the deployed no-tail student always sees
+        #    prev_action[2] = 0, while here it saw the raw tail command (inert in sim)
+        #    of whichever policy was driving. The released no-tail student was
+        #    distilled this way; kept to reproduce it.
         prev_action = np.asarray(act_action, dtype=float).ravel().copy()
         full_obs, _, terminated, truncated, _ = env.step(act_action)
         pair_valid.append(not (terminated or truncated))
@@ -250,7 +220,7 @@ def run_dagger(variant="tail", teacher=None, tag="", smooth_coef=0.0):
     act_dim = env.action_space.shape[0]
     print(f"  student obs {student_obs_dim}-dim "
           f"[grav 3 | joints 4 | prev action {ACT_DIM} | step 1]"
-          + ("  (tail channel zeroed)" if variant == "notail" else ""))
+          + ("  (tail joint reading zeroed)" if variant == "notail" else ""))
 
     # Initialize Student with restricted observation space
     student = StudentPolicy(student_obs_dim, act_dim)
@@ -286,12 +256,11 @@ def run_dagger(variant="tail", teacher=None, tag="", smooth_coef=0.0):
                 optimizer.zero_grad()
                 pred_actions = student(batch_states)
                 loss = criterion(pred_actions, batch_actions)
-                # Action-smoothness term, the student-side counterpart of
+                # Optional action-smoothness term, the student-side counterpart of
                 # smooth_sac.py::SmoothSAC. The teacher is smooth because its actor
                 # loss says so; the student only imitates, and it maps an 11-dim NOISY
                 # observation where the teacher had 73 clean ones, so per-frame sensor
-                # noise passes straight into the command. Measured on the shipped pair,
-                # the student's action rate was 35-45x its teacher's.
+                # noise passes straight into the command.
                 if smooth_coef > 0.0:
                     d = student(batch_next) - pred_actions
                     n = batch_valid.sum()
@@ -337,8 +306,8 @@ if __name__ == "__main__":
     parser.add_argument("--tag", default="", help="extra suffix for the output filename")
     parser.add_argument("--smooth-coef", type=float, default=0.0,
                         help="weight on ||pi(s_t+1) - pi(s_t)||^2 in the distillation "
-                             "loss (default 0.0 = off, the historical behaviour). The "
-                             "student is otherwise pure imitation and inherits none of "
-                             "the teacher's actor-loss smoothness.")
+                             "loss (default 0.0 = off). The student is otherwise pure "
+                             "imitation and inherits none of the teacher's actor-loss "
+                             "smoothness.")
     args = parser.parse_args()
     run_dagger(args.variant, args.teacher, args.tag, args.smooth_coef)

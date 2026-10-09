@@ -6,8 +6,8 @@ VARIANTS = {
 }
 
 # Every trained artifact lives here: teacher .zip, student .pth, exported .onnx.
-# Absolute, derived from this file, so a script works the same run from the repo
-# root, from docs/, or from hardware/ on the Pi.
+# Absolute, derived from this file, so a script works the same from any working
+# directory (e.g. the repo root, or hardware/ on the Pi).
 POLICY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policies")
 
 

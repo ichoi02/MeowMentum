@@ -1,18 +1,21 @@
 """
 End-to-end hardware-pipeline test (no physical hardware required).
 
-Drives the MuJoCo Cat-v0 sim as the "physical robot" and runs the ACTUAL
-hardware inference pipeline from controller.py (projected-gravity obs, previous
-action + step, ONNX inference, action low-pass, joint-range mapping). Verifies
-each stage matches the simulation/training pipeline, then confirms closed-loop
-righting.
+Drives the MuJoCo Cat-v0 / CatNoTail-v0 sim as the "physical robot" and runs the
+ACTUAL hardware inference pipeline from controller.py (student_obs, policy_action,
+joint_targets: projected-gravity obs, previous action + step, ONNX inference, action
+low-pass, joint-range mapping). Verifies each stage matches the simulation/training
+pipeline, then confirms closed-loop righting.
 
 The sim's front_body world-frame quaternion stands in for the front IMU (i.e. we
 assume the on-robot IMU alignment yields a z-up world frame); joint encoders are
 read from qpos. Everything downstream of that is the real controller code.
 
-Run from the repo root:  python hardware/e2e_test.py
+Runs from any directory (needs pyserial, since it imports controller.py):
+    python hardware/e2e_test.py                    # both variants
+    python hardware/e2e_test.py --variant notail
 """
+import argparse
 import os
 import sys
 import time
@@ -29,15 +32,15 @@ sys.path.insert(0, os.path.join(REPO, "hardware"))
 import gymnasium as gym
 import cat_env  # noqa: F401  (registers Cat-v0 / CatNoTail-v0)
 import distillation as D
-import controller as C  # the real hardware controller (constants + obs builder + util)
+import controller as C  # the real hardware controller
 from variants import VARIANTS, student_path, onnx_path
 
-# Floor for the closed-loop check. This is a pipeline-breakage tripwire, not a
-# performance target. N=100 with random attitudes is noisy -- observed no-tail runs
-# have ranged 12-25/100 -- so the floors sit well under the low end. They catch a
-# collapse to passivity (which reads ~0-2%, see docs/EVALUATION.md), not a few
-# points of drift.
-RIGHTING_FLOOR = {"tail": 10, "notail": 5}
+# Floor for the closed-loop check. This is a coarse pipeline-breakage tripwire, not a
+# performance target: N=100 random release attitudes is noisy. The released students
+# score about 50-60/100 (tail) and 20-35/100 (no tail). A zero-action policy scores about
+# 4-13/100, because some releases start close to upright, so the floors sit above that
+# baseline: they catch a broken pipeline as well as a collapse to passivity.
+RIGHTING_FLOOR = {"tail": 30, "notail": 15}
 
 results = []
 def check(name, ok, detail=""):
@@ -45,7 +48,7 @@ def check(name, ok, detail=""):
     results.append(ok)
 
 
-# ---- shared helpers: emulate the on-robot sensors + controller frame ----
+# ---- shared helpers: emulate the on-robot sensors ----
 def emulate_sensors(u):
     """Front IMU quaternion (world frame) + 4 joint encoder angles, from sim state."""
     front_quat = u.data.xquat[u._body_idx["front_body"]].copy()
@@ -53,11 +56,6 @@ def emulate_sensors(u):
     joints = np.array([u.data.qpos[qi["rot1"]], u.data.qpos[qi["pitch"]],
                        u.data.qpos[qi["rot2"]], u.data.qpos[qi["tail"]]])
     return front_quat, joints
-
-def controller_frame(front_quat, joints):
-    """One student frame exactly as controller.py builds it."""
-    grav = C.util.to_projected_gravity(front_quat)
-    return np.concatenate([grav, joints])
 
 def sim_student_frame(obs):
     """Ground-truth student frame from the sim obs (front_proj_grav[0:3] + joints[12:16])."""
@@ -68,12 +66,14 @@ def tilt_deg(u, body):
     return np.degrees(np.arccos(np.clip(up[2], -1.0, 1.0)))
 
 
-def main(variant="tail"):
+def run(variant):
+    """Run all checks for one variant. Returns True if every check passed."""
+    n_before = len(results)
     cfg = VARIANTS[variant]
     ONNX_FILE = onnx_path(variant)
     PTH_FILE = student_path(variant)
 
-    print(f"variant={variant}  env={cfg['env_id']}  onnx={os.path.basename(ONNX_FILE)}")
+    print(f"\n=== variant={variant}  env={cfg['env_id']}  onnx={os.path.basename(ONNX_FILE)} ===")
     print(f"obs={C.STUDENT_OBS_DIM}-dim  filter_alpha={C.FILTER_ALPHA}  "
           f"ranges(roll/pitch/tail)={C.ROLL_RANGE}/{C.PITCH_RANGE}/{C.TAIL_RANGE}")
 
@@ -84,7 +84,7 @@ def main(variant="tail"):
     student = D.StudentPolicy(D.STUDENT_OBS_DIM, 3)
     try:
         student.load_state_dict(torch.load(PTH_FILE, map_location="cpu"))
-    except RuntimeError as e:
+    except RuntimeError:
         # Almost always a stale artifact rather than a real bug: the observation
         # layout changed and this .pth predates it. Say so instead of dumping a
         # size-mismatch traceback.
@@ -92,9 +92,7 @@ def main(variant="tail"):
               f"{os.path.basename(PTH_FILE)} was built for a different observation "
               f"width (expected {D.STUDENT_OBS_DIM}). Re-run distillation.py and "
               f"onnx_conversion.py for --variant {variant}.")
-        print("\n=== SUMMARY ===")
-        print(f"{sum(results)}/{len(results)} checks passed")
-        sys.exit(1)
+        return False
     student.eval()
 
     # ---- TEST 0: dimensions line up across the whole chain ----
@@ -114,6 +112,9 @@ def main(variant="tail"):
     u = env.unwrapped
 
     # ---- TEST 2: controller obs-build == sim student obs (over a rollout) ----
+    # Both sides are fed the same prev_action (tail zeroed for notail, as deployed).
+    # distillation.collect_data fed back the unzeroed tail command instead; that
+    # train/deploy difference is outside what this test compares.
     obs, _ = env.reset()
     prev_c = np.zeros(C.ACT_DIM)
     prev_s = np.zeros(D.ACT_DIM)
@@ -121,15 +122,11 @@ def main(variant="tail"):
     maxdiff2 = 0.0
     for _ in range(300):
         fq, jt = emulate_sensors(u)
-        cf = C.zero_tail(controller_frame(fq, jt), variant)
+        ctrl_obs = C.student_obs(fq, jt, prev_c, step_i, variant)
         sf = D.zero_tail(sim_student_frame(obs), variant)
-        ctrl_obs = C.build_student_obs(cf, prev_c, min(step_i / C.MAX_STEPS, 1.0))
-        sim_obs = D.build_student_obs(sf, prev_s, obs[D.STEP_IDX])
-        maxdiff2 = max(maxdiff2, float(np.max(np.abs(ctrl_obs - sim_obs))))
-        raw = sess.run(None, {inp: ctrl_obs.astype(np.float32).reshape(1, -1)})[0][0]
-        raw = np.clip(raw, -1, 1)
-        if variant == "notail":
-            raw[2] = 0.0
+        sim_obs = D.build_student_obs(sf, prev_s, obs[D.STEP_IDX]).astype(np.float32)
+        maxdiff2 = max(maxdiff2, float(np.max(np.abs(ctrl_obs[0] - sim_obs))))
+        raw = C.policy_action(sess, inp, ctrl_obs, variant)
         prev_c = raw.copy(); prev_s = raw.copy()
         step_i += 1
         obs, _, term, trunc, _ = env.step(raw)
@@ -138,7 +135,7 @@ def main(variant="tail"):
             prev_c = np.zeros(C.ACT_DIM); prev_s = np.zeros(D.ACT_DIM); step_i = 0
     check("controller obs == sim student obs", maxdiff2 < 1e-6, f"max|diff|={maxdiff2:.2e}")
 
-    # ---- TEST 3: controller map == sim internal executed target ----
+    # ---- TEST 3: controller filter+map == sim internal executed target ----
     # Disable the sim's domain-randomization action delay so the comparison is 1:1.
     obs, _ = env.reset()
     u.action_delay = 0
@@ -150,16 +147,11 @@ def main(variant="tail"):
     for _ in range(300):
         raw = rng.uniform(-1, 1, 3).astype(np.float32)
         # Controller path: per-channel low-pass, then the joint-range map.
-        c_filt = C.FILTER_ALPHA * raw + (1.0 - C.FILTER_ALPHA) * c_filt
-        c_targets = np.array([
-            C.util.map_value(float(c_filt[0]), -1, 1, -C.ROLL_RANGE, C.ROLL_RANGE),
-            C.util.map_value(float(c_filt[1]), -1, 1, -C.PITCH_RANGE, C.PITCH_RANGE),
-            C.util.map_value(float(c_filt[2]), -1, 1, -C.TAIL_RANGE, C.TAIL_RANGE),
-        ])
+        c_targets, c_filt = C.joint_targets(raw, c_filt)
         obs, _, term, trunc, _ = env.step(raw)
         if not (term or trunc):
             sim_exec = np.asarray(u.ctrls[-1][:3])  # sim's mapped [rot1,pitch,tail] target
-            maxdiff3 = max(maxdiff3, float(np.max(np.abs(c_targets - sim_exec))))
+            maxdiff3 = max(maxdiff3, float(np.max(np.abs(np.array(c_targets[:3]) - sim_exec))))
             n_cmp += 1
         else:
             obs, _ = env.reset()
@@ -182,15 +174,10 @@ def main(variant="tail"):
         done = False
         while not done:
             fq, jt = emulate_sensors(u)
-            cf = C.zero_tail(controller_frame(fq, jt), variant)
-            x = C.build_student_obs(cf, prev_c, min(step_i / C.MAX_STEPS, 1.0))
-            x = x.astype(np.float32).reshape(1, -1)
+            x = C.student_obs(fq, jt, prev_c, step_i, variant)
             t0 = time.perf_counter()
-            raw = sess.run(None, {inp: x})[0][0]
+            raw = C.policy_action(sess, inp, x, variant)
             infer_times.append((time.perf_counter() - t0) * 1e3)
-            raw = np.clip(raw, -1, 1)
-            if variant == "notail":
-                raw[2] = 0.0
             prev_c = raw.copy()
             step_i += 1
             obs, _, term, trunc, _ = env.step(raw)
@@ -206,16 +193,17 @@ def main(variant="tail"):
           f"{np.median(ftilt):.0f}/{np.median(rtilt):.0f} deg")
     print(f"       ONNX inference: mean {np.mean(infer_times):.3f} ms, "
           f"p99 {np.percentile(infer_times,99):.3f} ms  (budget @50Hz = 20 ms)")
-
-    print("\n=== SUMMARY ===")
-    print(f"{sum(results)}/{len(results)} checks passed")
-    sys.exit(0 if all(results) else 1)
+    return all(results[n_before:])
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--variant", choices=list(VARIANTS), default="tail",
-                        help="ablation condition to test (default: tail)")
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--variant", choices=list(VARIANTS), default=None,
+                        help="ablation condition to test (default: both)")
     args = parser.parse_args()
-    main(args.variant)
+    for v in ([args.variant] if args.variant else list(VARIANTS)):
+        run(v)
+    print("\n=== SUMMARY ===")
+    print(f"{sum(results)}/{len(results)} checks passed")
+    sys.exit(0 if all(results) else 1)

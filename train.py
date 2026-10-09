@@ -1,4 +1,14 @@
-import gymnasium as gym
+"""Stage 1: train the privileged SAC teacher for one variant.
+
+    python train.py --variant tail
+    python train.py --variant notail
+
+The defaults (1M steps, 10 envs, smooth_coef 2.0, cat_env reward defaults) are the
+configuration of the released teachers. The checkpoint is saved as
+policies/cat_controller<suffix><tag>_<timestamp>.zip; copy it to
+policies/cat_controller<suffix>.zip to distill from it. TensorBoard logs go to
+./run_logs/ (the released teachers' logs are in results/training_logs/).
+"""
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -12,13 +22,11 @@ class TensorboardRewardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
 
-    # r_sm is gone: action smoothness is an actor-loss term now, logged by
-    # SmoothSAC as train/smooth_loss rather than by the env. r_bonus is gone too:
-    # the success bonus was removed from the reward (cat_env.py).
+    # Per-step reward terms from the env's info dict (cat_env._get_reward). Action
+    # smoothness is not among them: SmoothSAC logs it as train/smooth_loss.
     #
-    # record_mean, not record: `record` overwrites, so a dumped value was whichever
-    # step happened to land last in the logging interval -- a single sample presented
-    # as if it were an episode statistic, which made cross-run comparisons unreliable.
+    # record_mean, not record: `record` overwrites, so a dumped value would be the
+    # last step of the logging interval rather than its mean.
     TERMS = ("r_pos", "r_en", "r_av", "r_jv", "r_time", "up_mean")
 
     def _on_step(self) -> bool:
@@ -72,8 +80,8 @@ def train(variant="tail", total_timesteps=1_000_000, tag="", n_envs=10, seed=Non
         tb_log_name=run_name or "SAC",
     )
 
-    # Explicit --out is honoured as given (sweeps write to their own dirs);
-    # otherwise the timestamped checkpoint lands in policies/.
+    # An explicit --out is used as given; otherwise the timestamped checkpoint lands
+    # in policies/.
     model_path = out or os.path.join(
         policy_dir(),
         f"cat_controller{cfg['suffix']}{tag}_{time.strftime('%Y%m%d-%H%M%S')}.zip")
@@ -102,8 +110,8 @@ if __name__ == "__main__":
                              "(control arm for whether the privileged block helps)")
     parser.add_argument("--smooth-coef", type=float, default=2.0,
                         help="weight on the L2 action-smoothness term in the actor "
-                             "loss (default: 10.0; 0 disables it, and train/smooth_loss "
-                             "is still logged so the ablation is readable)")
+                             "loss (default: 2.0, as used for the released teachers; "
+                             "0 disables it, and train/smooth_loss is still logged)")
     args = parser.parse_args()
     train(args.variant, args.steps, args.tag, args.envs, args.seed, args.out,
           args.gradient_steps, args.run_name, privileged=not args.no_privileged,

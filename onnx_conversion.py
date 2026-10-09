@@ -1,30 +1,18 @@
+"""Stage 3: export the staged student (policies/student_policy<suffix>.pth) to the
+single-file ONNX model the robot runs (policies/cat_controller<suffix>.onnx).
+
+    python onnx_conversion.py --variant tail
+    python onnx_conversion.py --variant notail
+
+With torch 2.10.0 / onnx 1.21.0 / onnxscript 0.6.2 this reproduces the released ONNX
+files byte for byte.
+"""
 import os
 import torch
-import torch.nn as nn
-import time
 from variants import VARIANTS, policy_dir, student_path, onnx_path
-
-# 1. Define your policy/model architecture. 
-# This MUST exactly match the structure used during your RL training loop.
-class StudentPolicy(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_size=256):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, act_dim),
-            nn.Tanh() # Binds outputs to [-1, 1]
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-# --- Configuration ---
+# Imported rather than restated so the export cannot drift from the student.
 # Student obs = [front_proj_grav(3), joint_angles(4), prev action(3), step(1)].
-# Imported rather than restated so the export width cannot drift from the student.
-from distillation import STUDENT_OBS_DIM, ACT_DIM
+from distillation import StudentPolicy, STUDENT_OBS_DIM, ACT_DIM
 
 STATE_DIM = STUDENT_OBS_DIM
 ACTION_DIM = ACT_DIM
@@ -34,11 +22,8 @@ def main(variant="tail"):
     PTH_FILE = student_path(variant)
     ONNX_FILE = onnx_path(variant)
 
-    # 2. Instantiate the model and load the trained weights
+    # Load the trained weights (a state_dict) into the student architecture.
     model = StudentPolicy(STATE_DIM, ACTION_DIM)
-    
-    # If you saved the full model (torch.save(model)), you would just load it directly.
-    # If you saved the state_dict (recommended), load it like this:
     try:
         model.load_state_dict(torch.load(PTH_FILE, map_location=torch.device('cpu')))
     except Exception as e:
@@ -46,36 +31,33 @@ def main(variant="tail"):
         print("Ensure you are loading a state_dict and the architecture matches.")
         return
 
-    # 3. Set the model to evaluation mode
-    # Crucial for freezing layers like BatchNorm and Dropout so they behave deterministically
     model.eval()
 
-    # 4. Create a dummy input tensor
-    # This acts as a probe to trace the computational graph. 
-    # Shape here is (Batch_Size=1, State_Dimension)
+    # Dummy input used only to trace the graph. Shape (batch, STATE_DIM); the batch
+    # axis is exported as dynamic.
     dummy_input = torch.randn(1, STATE_DIM, requires_grad=True)
 
-    # 5. Export to ONNX
+    # Export at opset 14, then relabel the opset as 11 below: the graph is only
+    # Gemm/Relu/Tanh, whose float32 semantics are the same at opset 11.
     print(f"Exporting model to {ONNX_FILE} as opset 14...")
     torch.onnx.export(
-        model,                      
-        dummy_input,                
-        ONNX_FILE,                  
-        export_params=True,         
-        opset_version=14,           # CHANGED: Export to 14 to bypass PyTorch's broken downgrade
-        do_constant_folding=True,   
-        input_names=['state'],      
-        output_names=['action'],    
+        model,
+        dummy_input,
+        ONNX_FILE,
+        export_params=True,
+        opset_version=14,
+        do_constant_folding=True,
+        input_names=['state'],
+        output_names=['action'],
         dynamic_axes={
-            'state': {0: 'batch_size'},    
+            'state': {0: 'batch_size'},
             'action': {0: 'batch_size'}
         }
     )
     print("PyTorch export complete. Now patching opset metadata...")
 
-    # 6. Manually patch the Opset version down to 11
     import onnx
-    
+
     # Load the newly exported model (pulling in any external tensor data)
     onnx_model = onnx.load(ONNX_FILE, load_external_data=True)
 

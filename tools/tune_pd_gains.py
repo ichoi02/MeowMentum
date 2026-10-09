@@ -9,8 +9,12 @@ re-checks the winners across the domain-randomization distribution, since these
 gains get flashed to hardware and must hold for the whole range, not just nominal.
 
     python tools/tune_pd_gains.py                  # tune all four joints
-    python tools/tune_pd_gains.py --joint pitch    # one joint
+    python tools/tune_pd_gains.py --group pitch    # one group (roll = rot1 + rot2)
     python tools/tune_pd_gains.py --plot           # also write the step-response figure
+    python tools/tune_pd_gains.py --plot --out /tmp/pd.pdf
+
+The result is printed as pd_nominal (cat_env/cat_env.py) and as the firmware gains
+(x1024) for hardware/PD_control_{front,back}.
 """
 import argparse
 import os
@@ -240,7 +244,10 @@ def main():
     ap.add_argument("--group", choices=list(GROUPS), default=None,
                     help="tune just one group (roll = rot1+rot2 together)")
     ap.add_argument("--plot", action="store_true", help="write the step-response figure")
-    ap.add_argument("--out", default=os.path.join(REPO, "plots", "out"))
+    ap.add_argument("--out", default=os.path.join(REPO, "results", "figures", "pd_step_response.svg"),
+                    help="figure path for --plot. Saved as vector SVG with editable text; an "
+                         "explicit .pdf is kept, any other extension is replaced by .svg "
+                         "(default: results/figures/pd_step_response.svg)")
     ap.add_argument("--robust", type=int, default=24,
                     help="domain-randomization samples for the robustness check")
     args = ap.parse_args()
@@ -287,13 +294,19 @@ def main():
     if args.plot and chosen:
         plot(env, chosen, current, args.out)
 
-def plot(env, chosen, current, outdir):
+def figure_path(path):
+    """Keep an explicit .pdf; write anything else as .svg."""
+    root, ext = os.path.splitext(path)
+    return path if ext.lower() == ".pdf" else root + ".svg"
+
+def plot(env, chosen, current, out):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     C = dict(surface="#fcfcfb", ink="#0b0b0b", ink2="#52514e", ink3="#8a8880",
              grid="#e4e3dd", new="#2a78d6", old="#eb6834")
-    os.makedirs(outdir, exist_ok=True)
+    p = figure_path(out)
+    os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
     js = [j for j in JOINTS if j in chosen]
     fig, axes = plt.subplots(1, len(js), figsize=(3.6 * len(js), 3.6), squeeze=False)
     fig.patch.set_facecolor(C["surface"])
@@ -318,8 +331,9 @@ def plot(env, chosen, current, outdir):
     fig.suptitle("PD step response — dashed = commanded target",
                  color=C["ink"], fontsize=12, x=0.02, ha="left")
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    p = os.path.join(outdir, "pd_step_response.png")
-    fig.savefig(p, dpi=150, facecolor=C["surface"]); plt.close(fig)
+    with matplotlib.rc_context({"svg.fonttype": "none"}):   # keep text editable
+        fig.savefig(p, facecolor=C["surface"])
+    plt.close(fig)
     print(f"\nwrote {p}")
 
 if __name__ == "__main__":

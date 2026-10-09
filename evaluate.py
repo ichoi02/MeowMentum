@@ -1,20 +1,15 @@
 """Closed-loop righting success rate in simulation.
 
-Rolls a trained policy over many random drops and reports how often BOTH bodies
-finish upright. This is the number the tail ablation actually compares, and the
-one that says whether a given student frame-count survives realistic sensor
-error -- so by default the student is evaluated through the same per-episode
-bias + per-frame noise model it was distilled against.
+Rolls a trained policy over many drops and reports how often BOTH bodies finish
+within 30 deg of upright. By default the student is evaluated through the same
+per-episode bias + per-frame noise model it was distilled against (--clean
+disables it).
+
+    python evaluate.py --variant tail --agent student --episodes 200
+    python evaluate.py --variant notail --agent teacher --roll 180 --stats
 """
 import argparse
 import json
-import os
-import sys
-from collections import deque
-
-# Runnable as `python docs/evaluate.py` from the repo root, which puts docs/ on
-# sys.path but not the root the imports below need.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import gymnasium as gym
@@ -37,16 +32,12 @@ UPRIGHT_DEG = 30.0  # per-body tilt below which a landing counts as upright
 # These are what reward-weight tuning reads: a weight is doing something when the
 # magnitude it prices moves, which is visible whether or not the weight is zero.
 MAGNITUDES = ("m_en", "m_av", "m_jv", "m_time")
-# Deployed action smoothness, ||a_t - a_{t-1}||^2 summed over the 3 channels.
-# This is NOT read from `info`: the env stopped pricing action rate when the term
-# moved into the actor loss (smooth_sac.py), so it is measured here instead, on
-# the deterministic action the policy actually commands. It is the number to watch
-# when tuning `--smooth-coef`, and it is the direct successor to the old `m_sm`
-# -- but not comparable to it, since `m_sm` averaged over channels rather than
-# summing, and was recorded on the training-time (noisy) action.
+# Deployed action smoothness, ||a_t - a_{t-1}||^2 summed over the 3 channels. Not
+# read from `info` (action rate is not a reward term; it is the actor-loss term in
+# smooth_sac.py), so it is measured here on the deterministic action the policy
+# actually commands. The number to watch when tuning `--smooth-coef`.
 DET_SMOOTHNESS = "m_dsm"
-# Task term, for scale: a penalty weight is "large" relative to this. The success
-# bonus was removed from the reward, so r_pos is the whole task signal now.
+# Task term, for scale: a penalty weight is "large" relative to this.
 TASK_TERMS = ("r_pos",)
 
 def tilt_deg(env, body):
@@ -59,13 +50,14 @@ def clean_frame(full_obs):
     return np.concatenate([full_obs[FRONT_GRAV_SLICE], full_obs[JOINT_ANGLE_SLICE]])
 
 def force_attitude(u, roll_deg, pitch_deg):
-    """Re-release at a fixed roll/pitch instead of the uniform random attitude.
+    """Re-release at a fixed roll/pitch instead of the random attitude.
 
-    reset_model() samples a uniform SO(3) attitude, so success over N drops mixes
-    every release orientation together. This overwrites ONLY the root orientation,
-    leaving the domain-randomization draw, the randomized initial joint angles and
-    the initial tumble alone -- the point is to hold the release attitude fixed
-    while everything else still varies, not to make the drop deterministic.
+    reset_model() draws roll uniformly over +-180 deg and pitch over +-45, so success
+    over N drops mixes every release orientation together. This overwrites ONLY the
+    root orientation, leaving the domain-randomization draw, the randomized initial
+    joint angles and the initial tumble alone -- the point is to hold the release
+    attitude fixed while everything else still varies, not to make the drop
+    deterministic.
 
     Whichever of roll/pitch is not given is zero, so `--roll 180` is a pure roll
     release and `--pitch 90` a pure pitch one. Yaw is always 0 (the task and the
@@ -86,8 +78,8 @@ def evaluate(variant="tail", agent="student", episodes=200,
     cfg = VARIANTS[variant]
 
     # The teacher is loaded BEFORE the env so the env can be built at whatever
-    # width that checkpoint expects. Teachers trained before the privileged DR
-    # block are 25-dim and would otherwise fail against the 73-dim env; the
+    # width that checkpoint expects. A teacher trained with `train.py --no-privileged`
+    # is 25-dim and would otherwise fail against the 73-dim env; the
     # student never sees the block either way, so it always gets the full env.
     policy = None
     if agent == "teacher":
@@ -183,7 +175,7 @@ def evaluate(variant="tail", agent="student", episodes=200,
         "travel": np.mean(travel, axis=0).tolist(),           # [rot1, pitch, rot2, tail] rad
         "final_omega": float(np.mean(final_omega)),           # rad/s
         DET_SMOOTHNESS: float(np.mean(dsm)),
-        "roll_deg": roll_deg,      # None = uniform random attitude
+        "roll_deg": roll_deg,      # None = random release attitude (reset_model)
         "pitch_deg": pitch_deg,
     }
     res.update({k: float(np.mean(v)) for k, v in mags.items()})
@@ -203,7 +195,7 @@ def main():
     parser.add_argument("--json", action="store_true", help="dump the full result as JSON")
     parser.add_argument("--roll", type=float, default=None, metavar="DEG",
                         help="release at a fixed roll about world x with pitch 0, "
-                             "instead of a uniformly random attitude (e.g. 180 = "
+                             "instead of a random attitude (e.g. 180 = "
                              "upside-down, 90 = on its side). DR, initial joint "
                              "angles and the initial tumble still vary per drop")
     parser.add_argument("--pitch", type=float, default=None, metavar="DEG",

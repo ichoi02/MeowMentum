@@ -1,6 +1,6 @@
 """Tilt and commanded joint targets for a single drop, clocked from release.
 
-Top panel: front- and rear-body tilt from vertical over the drop.
+Top panel: front- and rear-body tilt (|roll| + |pitch|, as in Fig. 4) over the drop.
 Bottom panel: the joint targets the policy commanded (roll, pitch, tail),
 shared x-axis, so a change in tilt can be read against the command that caused it.
 
@@ -11,31 +11,26 @@ reads free fall, so the first sample is the drop, up to one 50 Hz tick of
 detection latency.
 
 Rear tilt is RECONSTRUCTED from the front IMU and the three spine encoders
-(plot.compute_rear_body_dynamics), not read from B_Q*: the rear IMU reports
-identity in every log under raw/, so its quaternion carries no orientation.
+(kinematics.compute_rear_body_quat), not read from B_Q*: the rear IMU reports
+identity in every log, so its quaternion carries no orientation.
 
 Usage:
-    python raw/control_plot.py                                  # default run
-    python raw/control_plot.py path/to/run.csv -n 30
-    python raw/control_plot.py path/to/run.csv --deg --out fig.png
+    python analysis/plot_drop.py                                # default trial
+    python analysis/plot_drop.py path/to/trial.csv -n 45
+    python analysis/plot_drop.py path/to/trial.csv --deg --out drop.svg
 """
 import argparse
 import os
-import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
-# Runnable as `python raw/control_plot.py` from the repo root, which does not put
-# raw/ on sys.path, and as `python control_plot.py` from inside raw/.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kinematics import fall_distance, load_drop
 
-from plot import G, compute_rear_body_dynamics, compute_tilt_angle
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_RUN = os.path.join(HERE, "with_tail", "roll", "roll_180deg",
-                           "wt_roll_180deg_0810_rep03.csv")
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RUN = (ROOT / "data" / "hardware_trials" / "with_tail" / "roll" / "roll_180deg"
+               / "wt_roll_180deg_0810_rep03.csv")
 
 # Commanded joint targets, in the controller's own column names. rot2 is omitted:
 # controller.py drives it as -rot1 (Cmd_B2 == -Cmd_F1), so it carries no
@@ -49,25 +44,6 @@ def as_vector(path):
     return path if ext.lower() == ".pdf" else stem + ".svg"
 
 
-def fall_distance(t):
-    """Free-fall distance (m) at time t (s) after release."""
-    return 0.5 * G * np.asarray(t, dtype=float) ** 2
-
-
-def load_drop(path, steps):
-    """One telemetry CSV -> the first `steps` control steps, clocked from release."""
-    df = pd.read_csv(path).iloc[:steps]
-    t = df["Time"].to_numpy(dtype=float)
-    front_q = df[["F_Q0", "F_Q1", "F_Q2", "F_Q3"]].to_numpy(dtype=float)
-    rear_q = compute_rear_body_dynamics(front_q, df["F_M1"], df["F_M2"], df["B_M2"])
-    return {
-        "t": t - t[0],
-        "tilt_front": compute_tilt_angle(front_q),
-        "tilt_rear": compute_tilt_angle(rear_q),
-        "targets": {name: df[col].to_numpy(dtype=float) for col, name in TARGETS},
-    }
-
-
 def time_distance_ticks(t_max, spacing):
     """Tick positions every `spacing` seconds, labelled "time (distance)"."""
     ticks = np.arange(0.0, t_max + 1e-9, spacing)
@@ -75,7 +51,7 @@ def time_distance_ticks(t_max, spacing):
     return ticks, labels
 
 
-def plot_drop(run, steps=50, spacing=0.2, degrees=False, out=None):
+def plot_drop(run, steps=32, spacing=0.2, degrees=False, out=None):
     d = load_drop(run, steps)
     t = d["t"]
 
@@ -89,8 +65,8 @@ def plot_drop(run, steps=50, spacing=0.2, degrees=False, out=None):
     ax_tilt.legend()
 
     scale = np.degrees(1.0) if degrees else 1.0
-    for name, series in d["targets"].items():
-        ax_cmd.plot(t, series * scale, label=name)
+    for col, name in TARGETS:
+        ax_cmd.plot(t, d["frame"][col].to_numpy(dtype=float) * scale, label=name)
     ax_cmd.set_ylabel("target [deg]" if degrees else "target [rad]")
     ax_cmd.legend(ncol=3, fontsize="small")
 
@@ -103,6 +79,7 @@ def plot_drop(run, steps=50, spacing=0.2, degrees=False, out=None):
     fig.tight_layout()
     if out:
         out = as_vector(out)
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
         with plt.rc_context({"svg.fonttype": "none"}):
             fig.savefig(out, bbox_inches="tight")
         print(f"saved {out}")
@@ -114,16 +91,18 @@ def plot_drop(run, steps=50, spacing=0.2, degrees=False, out=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("run", nargs="?", default=DEFAULT_RUN,
-                        help="telemetry CSV to plot (default: %(default)s)")
+    parser.add_argument("run", nargs="?", default=str(DEFAULT_RUN),
+                        help=f"trial CSV to plot (default: {DEFAULT_RUN.relative_to(ROOT)})")
     parser.add_argument("-n", "--steps", type=int, default=32,
-                        help="control steps to plot, from release (default: 50)")
+                        help="control steps to plot, from release; the logs hold 49-50 "
+                             "(default: %(default)s)")
     parser.add_argument("--spacing", type=float, default=0.2,
-                        help="x-tick spacing in seconds (default: 0.2)")
+                        help="x-tick spacing in seconds (default: %(default)s)")
     parser.add_argument("--deg", action="store_true",
                         help="plot joint targets in degrees instead of radians")
     parser.add_argument("--out", default=None,
-                        help="save here instead of opening a window; written as SVG "
-                             "unless the name ends in .pdf")
+                        help="save here instead of opening a window; written as SVG (text "
+                             "kept editable) unless the name ends in .pdf, any other "
+                             "extension is replaced by .svg")
     args = parser.parse_args()
     plot_drop(args.run, args.steps, args.spacing, args.deg, args.out)

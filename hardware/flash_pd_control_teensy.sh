@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # Compile hardware/PD_control_front and hardware/PD_control_back, then flash each hex to
-# the matching Teensy (SN_FRONT / SN_BACK from hardware/controller.py).
+# the matching Teensy 4.0 (SN_FRONT / SN_BACK from hardware/controller.py).
 # teensy_loader_cli cannot select by USB serial; on each step put only that board in
 # bootloader (program button) — the script prints role + serial to match hardware.
 #
-# Prerequisites: conda env cat + arduino-cli, teensy-loader-cli, PJRC udev rules.
+# Prerequisites:
+#   - arduino-cli with the Teensy core (Teensyduino, FQBN teensy:avr:teensy40):
+#       arduino-cli core install teensy:avr \
+#         --additional-urls https://www.pjrc.com/teensy/package_teensy_index.json
+#     The core bundles the PJRC Encoder and Wire libraries.
+#   - Adafruit BNO08x library (front board only): arduino-cli lib install "Adafruit BNO08x"
+#   - teensy_loader_cli (and on Linux the PJRC udev rules, 00-teensy.rules) for flashing.
+#   arduino-cli is taken from $ARDUINO_CLI, else $CONDA_PREFIX/bin/arduino-cli (with its
+#   data/user directories under $CONDA_PREFIX/arduino), else from PATH.
 #
 # Usage:
-#   conda activate cat
 #   bash hardware/flash_pd_control_teensy.sh              # both
 #   bash hardware/flash_pd_control_teensy.sh --front      # compile + flash front only
 #   bash hardware/flash_pd_control_teensy.sh --back       # back only
@@ -43,11 +50,14 @@ Build vs flash:
 Other:
   FQBN=teensy:avr:teensy41   Board variant (default: teensy:avr:teensy40)
   PD_CONTROL_BUILD_DIR=...  Optional; defaults to hardware/.pd_teensy_build
+  ARDUINO_CLI=...           arduino-cli binary (default: $CONDA_PREFIX/bin/arduino-cli
+                            if present, else arduino-cli on PATH)
 
   --help, -h    This text.
 
-Compile path needs: conda activate cat, arduino-cli.
-Flash path needs: teensy_loader_cli, PJRC udev rules.
+Compile path needs: arduino-cli with the Teensy core (teensy:avr) and the
+  "Adafruit BNO08x" library; Encoder and Wire come with the Teensy core.
+Flash path needs: teensy_loader_cli (+ PJRC udev rules on Linux).
 EOF
 }
 
@@ -131,21 +141,27 @@ OUT_BASE="${PD_CONTROL_BUILD_DIR:-$DEFAULT_BUILD_ROOT}"
 OUT_FRONT="${OUT_BASE}/front"
 OUT_BACK="${OUT_BASE}/back"
 
+CLI_IN_CONDA=0
 if [[ "$DO_COMPILE" -eq 1 ]]; then
-  if [[ -z "${CONDA_PREFIX:-}" ]]; then
-    echo "conda activate cat first."
-    exit 1
+  if [[ -n "${ARDUINO_CLI:-}" ]]; then
+    CLI="$ARDUINO_CLI"
+  elif [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/arduino-cli" ]]; then
+    CLI="${CONDA_PREFIX}/bin/arduino-cli"
+    CLI_IN_CONDA=1
+  else
+    CLI="$(command -v arduino-cli || true)"
   fi
-  CLI="${CONDA_PREFIX}/bin/arduino-cli"
-  if [[ ! -x "$CLI" ]]; then
-    echo "arduino-cli missing. Run: bash hardware/install_arduino_cli_cat_env.sh"
+  if [[ -z "$CLI" || ! -x "$CLI" ]]; then
+    echo "arduino-cli not found. Install it (https://arduino.github.io/arduino-cli/), add the" >&2
+    echo "Teensy core and the Adafruit BNO08x library (see the top of this script), or set ARDUINO_CLI." >&2
     exit 1
   fi
 fi
 
 if [[ "$DO_FLASH" -eq 1 ]]; then
   if ! command -v teensy_loader_cli >/dev/null 2>&1; then
-    echo "teensy_loader_cli not found. Install: sudo apt install teensy-loader-cli"
+    echo "teensy_loader_cli not found. Install: sudo apt install teensy-loader-cli (Linux)," >&2
+    echo "brew install teensy_loader_cli (macOS), or build it from github.com/PaulStoffregen/teensy_loader_cli." >&2
     exit 1
   fi
 fi
@@ -166,7 +182,10 @@ if [[ "$DO_COMPILE" -eq 1 ]]; then
   fi
 fi
 
-readarray -t FLASH_ORDER < <(CONTROLLER_PY="$CONTROLLER_PY" SELECT_FRONT="$SELECT_FRONT" SELECT_BACK="$SELECT_BACK" python3 <<'PY'
+FLASH_ORDER=()
+while IFS= read -r line; do
+  FLASH_ORDER+=("$line")
+done < <(CONTROLLER_PY="$CONTROLLER_PY" SELECT_FRONT="$SELECT_FRONT" SELECT_BACK="$SELECT_BACK" python3 <<'PY'
 import os
 import re
 
@@ -192,8 +211,11 @@ HEX_FRONT=""
 HEX_BACK=""
 
 if [[ "$DO_COMPILE" -eq 1 ]]; then
-  export ARDUINO_DIRECTORIES_DATA="${CONDA_PREFIX}/arduino/data"
-  export ARDUINO_DIRECTORIES_USER="${CONDA_PREFIX}/arduino/user"
+  if [[ "$CLI_IN_CONDA" -eq 1 ]]; then
+    # Keep the conda-installed arduino-cli's cores and libraries inside the env.
+    export ARDUINO_DIRECTORIES_DATA="${ARDUINO_DIRECTORIES_DATA:-${CONDA_PREFIX}/arduino/data}"
+    export ARDUINO_DIRECTORIES_USER="${ARDUINO_DIRECTORIES_USER:-${CONDA_PREFIX}/arduino/user}"
+  fi
 
   mkdir -p "$OUT_BASE"
   if [[ "$SELECT_FRONT" -eq 1 ]]; then

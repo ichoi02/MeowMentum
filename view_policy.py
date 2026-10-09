@@ -1,3 +1,11 @@
+"""Watch a trained policy right the robot in the MuJoCo viewer (closed loop, sim).
+
+    python view_policy.py --variant tail --agent student
+    python view_policy.py --variant notail --agent teacher --roll 180 --pitch 45 --slow 0.2
+
+Episodes repeat until the viewer is closed. On macOS the passive viewer needs
+`mjpython` instead of `python`.
+"""
 import gymnasium as gym
 from stable_baselines3 import SAC
 import torch
@@ -5,7 +13,6 @@ import numpy as np
 import time
 import mujoco
 import mujoco.viewer
-from collections import deque
 from scipy.spatial.transform import Rotation as R
 import cat_env
 from cat_env.cat_env import BASE_OBS_DIM
@@ -19,36 +26,42 @@ def student_frame(full_obs):
     """Clean (noise-free) single student frame: [front_proj_grav(3), joint_angles(4)]."""
     return np.concatenate([full_obs[FRONT_GRAV_SLICE], full_obs[JOINT_ANGLE_SLICE]])
 
-def force_release(env, roll_deg=None, still=False):
-    """Re-release the robot at a fixed roll instead of the random attitude.
+def force_release(env, roll_deg=None, pitch_deg=None, still=False):
+    """Re-release the robot at a fixed roll/pitch instead of the random attitude.
 
-    reset_model() samples a uniform SO(3) attitude, so every drop looks different.
-    This overwrites just the root orientation (and optionally the initial tumble)
-    after the reset, leaving the domain-randomization draw and the randomized joint
-    angles alone -- the point is to watch the SAME maneuver from a repeatable
-    release, not to remove the rest of the randomization.
+    reset_model() draws roll uniformly over +-180 deg and pitch over +-45, so every
+    drop looks different. This overwrites just the root orientation (and optionally
+    the initial tumble) after the reset, leaving the domain-randomization draw and
+    the randomized joint angles alone -- the point is to watch the SAME maneuver
+    from a repeatable release, not to remove the rest of the randomization.
+
+    Whichever of roll/pitch is not given is zero, so `--roll 180` is a pure roll
+    release and `--pitch 45` a pure pitch one. Yaw is always 0: the observation and
+    the reward are yaw-invariant, so it would change nothing. The Euler order
+    matches cat_env.reset_model and evaluate.py::force_attitude, so a release
+    here lands on exactly the attitude those two would produce.
 
     Returns the recomputed observation, which the caller must use: the one reset()
     handed back describes the pre-override state.
     """
     u = env.unwrapped
     qpos, qvel = u.data.qpos.copy(), u.data.qvel.copy()
-    if roll_deg is not None:
-        # Roll about the world x-axis. MuJoCo stores the free joint as wxyz.
-        x, y, z, w = R.from_euler("x", roll_deg, degrees=True).as_quat()
-        qpos[3:7] = [w, x, y, z]
+    if roll_deg is not None or pitch_deg is not None:
+        euler = [roll_deg or 0.0, pitch_deg or 0.0, 0.0]
+        x, y, z, w = R.from_euler("xyz", euler, degrees=True).as_quat()
+        qpos[3:7] = [w, x, y, z]   # MuJoCo stores the free joint as wxyz
     if still:
         qvel[3:6] = 0.0   # drop with zero angular momentum, not already tumbling
     u.set_state(qpos, qvel)
     return u._get_obs()
 
-def visualize(variant="tail", agent="student", roll_deg=None, still=False,
-              policy_path=None):
+def visualize(variant="tail", agent="student", roll_deg=None, pitch_deg=None,
+              still=False, policy_path=None, slow=1.0):
     cfg = VARIANTS[variant]
 
     # Teacher loads BEFORE the env, so the env can be built at whatever width the
-    # checkpoint expects -- same reason as docs/evaluate.py. Teachers trained
-    # before the privileged DR block are 25-dim and would otherwise fail against
+    # checkpoint expects -- same reason as evaluate.py. A teacher trained with
+    # `train.py --no-privileged` is 25-dim and would otherwise fail against
     # the 73-dim env. The student's slices are unaffected either way (the block is
     # appended last), so it always gets the full env.
     teacher = None
@@ -70,9 +83,11 @@ def visualize(variant="tail", agent="student", roll_deg=None, still=False,
             policy_path or student_path(variant), map_location="cpu"))
         student.eval()
 
+    forced = roll_deg is not None or pitch_deg is not None or still
+
     obs, _ = env.reset()
-    if roll_deg is not None or still:
-        obs = force_release(env, roll_deg, still)
+    if forced:
+        obs = force_release(env, roll_deg, pitch_deg, still)
     prev_action = np.zeros(ACT_DIM)   # no command history at release
 
     mj_model = env.unwrapped.model
@@ -88,9 +103,6 @@ def visualize(variant="tail", agent="student", roll_deg=None, still=False,
         viewer.cam.distance = 1.5
         viewer.cam.elevation = -20
         viewer.cam.azimuth = 90
-        viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD
-
-        slow = 1.0
 
         try:
             while viewer.is_running():
@@ -111,8 +123,8 @@ def visualize(variant="tail", agent="student", roll_deg=None, still=False,
 
                 if terminated or truncated:
                     obs, _ = env.reset()
-                    if roll_deg is not None or still:
-                        obs = force_release(env, roll_deg, still)
+                    if forced:
+                        obs = force_release(env, roll_deg, pitch_deg, still)
                     prev_action = np.zeros(ACT_DIM)
                 
                 viewer.sync()
@@ -136,12 +148,22 @@ if __name__ == "__main__":
     parser.add_argument("--roll", type=float, default=None, metavar="DEG",
                          help="release at a fixed roll about world x instead of a "
                               "random attitude, e.g. 180 (upside-down) or 90 (on its side)")
+    parser.add_argument("--pitch", type=float, default=None, metavar="DEG",
+                         help="release at a fixed pitch about world y; combines with "
+                              "--roll, and either one alone leaves the other at 0 "
+                              "(same flag as evaluate.py)")
     parser.add_argument("--still", action="store_true",
                          help="release with zero angular velocity (no initial tumble)")
     parser.add_argument("--policy", default=None,
                          help="explicit policy file to load, instead of the staged "
                               "policies/cat_controller<suffix>.zip or "
                               "policies/student_policy<suffix>.pth "
-                              "(same flag as docs/evaluate.py)")
+                              "(same flag as evaluate.py)")
+    parser.add_argument("--slow", type=float, default=1.0, metavar="FACTOR",
+                         help="playback speed as a fraction of real time "
+                              "(default: 1.0 = real time; 0.2 = 5x slow motion)")
     args = parser.parse_args()
-    visualize(args.variant, args.agent, args.roll, args.still, args.policy)
+    if args.slow <= 0:
+        parser.error("--slow must be > 0")
+    visualize(args.variant, args.agent, args.roll, args.pitch, args.still,
+              args.policy, args.slow)

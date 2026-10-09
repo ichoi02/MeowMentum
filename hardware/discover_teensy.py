@@ -1,3 +1,11 @@
+"""List the Teensy serial ports and their USB serial numbers.
+
+    python hardware/discover_teensy.py          # Teensy ports only
+    python hardware/discover_teensy.py --all    # every serial port
+
+Copy the two boards' serial numbers into SN_FRONT / SN_BACK in hardware/controller.py.
+With both boards plugged in, unplug one to tell which is which.
+"""
 import argparse
 import os
 import sys
@@ -101,7 +109,7 @@ def discover_teensys(*, list_all: bool = False) -> None:
                 )
         elif not list_all and ports:
             print("Tip: run with --all to list every serial port.")
-        else:
+        elif sys.platform == "linux":
             print("No PJRC USB devices seen under /sys/bus/usb/devices either.")
 
 
