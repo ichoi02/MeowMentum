@@ -151,16 +151,19 @@
     function tick() {
       var D = vt.duration;
       if (!vt.paused && D) {
-        // loop-aware drift: one clip may wrap a frame before the other
+        // The clips are matched frame for frame by robot height, so keep them within a
+        // frame: nudge the playback rate for small drift, seek only after a big jump.
+        // Loop-aware: one clip may wrap a frame before the other.
         var d = vn.currentTime - vt.currentTime;
         if (d > D / 2) d -= D; else if (d < -D / 2) d += D;
-        if (Math.abs(d) > 0.08) vn.currentTime = vt.currentTime;
+        if (Math.abs(d) > 0.25) { vn.currentTime = vt.currentTime; vn.playbackRate = 1; }
+        else vn.playbackRate = Math.max(0.85, Math.min(1.15, 1 - d * 3));
         bar.style.width = (vt.currentTime / D * 100) + "%";
       }
       raf = requestAnimationFrame(tick);
     }
     function play() { vids.forEach(playSafe); cancelAnimationFrame(raf); raf = requestAnimationFrame(tick); }
-    function pause() { vids.forEach(function (v) { v.pause(); }); cancelAnimationFrame(raf); icons(); }
+    function pause() { vids.forEach(function (v) { v.pause(); }); vn.playbackRate = 1; cancelAnimationFrame(raf); icons(); }
     function load(name) {
       if (name === current) return;
       current = name;

@@ -328,17 +328,17 @@ section.block { padding-block: clamp(56px, 8vw, 104px); border-top: 1px solid va
 .clip { margin: 0; display: grid; gap: 10px; min-width: 0; }
 .clip-frame {
   position: relative;
-  aspect-ratio: 9 / 14;
+  aspect-ratio: 9 / 16;
   border-radius: 12px;
   overflow: hidden;
   background-color: var(--sunken);
   background-size: cover;
-  background-position: 50% 45%;
+  background-position: 50% 50%;
   box-shadow: var(--shadow);
 }
 .clip-frame video {
   width: 100%; height: 100%;
-  object-fit: cover; object-position: 50% 45%;
+  object-fit: cover; object-position: 50% 50%;
   transition: opacity 0.3s var(--ease), filter 0.3s var(--ease);
 }
 .clip-frame video.fading { opacity: 0; filter: blur(6px); }
