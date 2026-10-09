@@ -48,37 +48,20 @@
     btn.setAttribute("aria-label", (playing ? "Pause " : "Play ") + what);
   }
 
-  /* ---------------- theme ---------------- */
-  var root = document.documentElement;
-  var themeBtn = $("#theme");
-  function effectiveTheme() {
-    var t = root.getAttribute("data-theme");
-    if (t) return t;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  function syncThemeUI() {
-    var dark = effectiveTheme() === "dark";
-    themeBtn.setAttribute("aria-pressed", String(dark));
-    if (root.getAttribute("data-theme")) {
-      $$('meta[name="theme-color"]').forEach(function (m) { m.setAttribute("content", dark ? "#0c0e11" : "#f9fafb"); m.removeAttribute("media"); });
+  /* ---------------- abstract: collapsed until asked for ----------------
+     Open in the markup, so it stays readable without the script. */
+  (function abstractToggle() {
+    var box = $("#abstract-box");
+    if (!box) return;
+    var btn = $(".abstract-toggle", box), inner = $(".abstract-inner", box);
+    function set(open) {
+      box.classList.toggle("open", open);
+      btn.setAttribute("aria-expanded", String(open));
+      inner.inert = !open;
     }
-  }
-  themeBtn.addEventListener("click", function () {
-    var next = effectiveTheme() === "dark" ? "light" : "dark";
-    var apply = function () {
-      root.setAttribute("data-theme", next);
-      try { localStorage.setItem("mm-theme", next); } catch (e) {}
-      syncThemeUI();
-      window.dispatchEvent(new CustomEvent("mm-theme"));
-    };
-    if (document.startViewTransition && !reduceMotion) document.startViewTransition(apply);
-    else apply();
-  });
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
-    syncThemeUI();
-    window.dispatchEvent(new CustomEvent("mm-theme"));
-  });
-  syncThemeUI();
+    set(false);
+    btn.addEventListener("click", function () { set(!box.classList.contains("open")); });
+  })();
 
   /* ---------------- nav ---------------- */
   var nav = $("#nav");
@@ -228,17 +211,6 @@
     });
     icons();
   })();
-
-  /* ---------------- equations ---------------- */
-  function renderTeX() {
-    if (!window.katex) return;
-    $$(".eq[data-tex]").forEach(function (el) {
-      try { window.katex.render(el.getAttribute("data-tex"), el, { displayMode: true, throwOnError: false }); } catch (e) {}
-    });
-    $$(".tex[data-tex]").forEach(function (el) {
-      try { window.katex.render(el.getAttribute("data-tex"), el, { displayMode: false, throwOnError: false }); } catch (e) {}
-    });
-  }
 
   /* ---------------- tooltip ---------------- */
   var tip = $("#tip");
@@ -507,7 +479,6 @@
   }
 
   /* ---------------- boot ---------------- */
-  renderTeX();
   tiltLegend();
   tiltCharts();
   scoreCharts();

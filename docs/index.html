@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MeowMentum</title>
 <meta name="description" content="A 1.86 kg cat-inspired robot that rights itself in free fall with an actuated spine and tail, using a reinforcement-learning policy trained only in simulation and run onboard.">
-<meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0c0e11" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f9fafb">
+<meta name="color-scheme" content="light">
 <!-- Absolute URLs are required by social-card crawlers. Update them if the page is hosted elsewhere. -->
 <link rel="canonical" href="https://ichoi02.github.io/MeowMentumV2/">
 <meta property="og:type" content="website">
@@ -23,16 +23,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400..800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" crossorigin="anonymous">
 <link rel="stylesheet" href="css/site.css">
-<script>
-  // Theme before first paint, so nothing flashes.
-  (function () {
-    var d = document.documentElement;
-    d.classList.add("js");
-    try { var t = localStorage.getItem("mm-theme"); if (t === "light" || t === "dark") d.setAttribute("data-theme", t); } catch (e) {}
-  })();
-</script>
+<script>document.documentElement.classList.add("js");</script>
 <script type="importmap">
   { "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
@@ -50,17 +42,13 @@
       <span>MeowMentum</span>
     </a>
     <div class="nav-links">
-      <a href="#overview">Overview</a>
+      <a href="#abstract">Abstract</a>
       <a href="#drops">Drops</a>
       <a href="#robot">Robot</a>
       <a href="#method">Method</a>
       <a href="#replay">Replay</a>
       <a href="#results">Results</a>
     </div>
-    <button class="icon-btn" id="theme" type="button" aria-label="Dark theme" aria-pressed="false">
-      <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
-      <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7Z"/></svg>
-    </button>
   </div>
 </nav>
 
@@ -70,7 +58,6 @@
   <header class="hero page">
     <div class="hero-grid">
       <div class="hero-text">
-        <p class="eyebrow" data-load style="--d:0">Aerial self-righting · Under review</p>
         <h1 aria-label="MeowMentum"><span aria-hidden="true" id="wordmark-h1">MeowMentum</span></h1>
         <script>
           // Split the title into letters before first paint so the load animation never flashes.
@@ -106,29 +93,13 @@
     </div>
   </header>
 
-  <!-- ============ OVERVIEW ============ -->
-  <section class="block page" id="overview">
+  <!-- ============ ABSTRACT ============ -->
+  <section class="block page" id="abstract">
     <div class="grid">
-      <div class="section-head" data-reveal>
-        <p class="eyebrow">Overview</p>
-        <h2>Two ways to land on your feet, in one body</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p class="lead">Cats right themselves in mid-air by bending and twisting a flexible body. Lizards do it by swinging their tails. MeowMentum combines both: two body segments joined by an actuated two-degree-of-freedom spine, plus a one-degree-of-freedom actuated tail.</p>
-        <p>The robot detects its own free fall and rights itself in closed loop from onboard sensing, with a policy trained only in simulation and deployed without tuning on hardware. Because the tail can be removed, the same platform shows what the tail adds: we dropped the robot with and without it from a range of roll and pitch attitudes and scored how upright and how straight it was in the air.</p>
-      </div>
-      <div class="highlights wide mt-fig" data-reveal>
-        <div class="highlight">
-          <div class="value">1<small>&nbsp;m</small></div>
-          <p>Free fall after which the tailed robot's mean body tilt, averaged over its drops, was below 45°, the paper's feet-down threshold. Without the tail the average got there within 2&nbsp;m.</p>
-        </div>
-        <div class="highlight">
-          <div class="value">+0.157</div>
-          <p>Gain in whole-cat score from the tail, adjusted for release, date, initial posture and spin (95% CI 0.062–0.252, <i>p</i>&nbsp;=&nbsp;0.0016). The score runs from 0 to 1; raw means went from 0.69 to 0.80.</p>
-        </div>
-        <div class="highlight">
-          <div class="value">72</div>
-          <p>Scored hand-released hardware drops from six release attitudes: 35 with the tail and 37 without.</p>
+      <div class="abstract" id="abstract-box" data-reveal>
+        <h2><button type="button" class="abstract-toggle" aria-expanded="true" aria-controls="abstract-body">Abstract<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h2>
+        <div class="abstract-body" id="abstract-body">
+          <div class="abstract-inner"><p>Robots operating in unstructured environments may fall or overturn, and recovering an upright posture is critical for sustained operation. Inspired by the feline righting reflex, in which coordinated body and tail motions contribute to aerial reorientation, this work investigates the role of spine and tail actuation in aerial self-righting. We hypothesized that adding an actuated tail improves self-righting performance despite its added mass and mechanical complexity. To evaluate this hypothesis, we present MeowMentum, a 1.86&nbsp;kg self-righting robot that combines a two-degree-of-freedom (2-DoF) actuated spine with a one-degree-of-freedom (1-DoF) actuated tail, using onboard sensing and closed-loop control. Reinforcement learning-based controllers were trained in a physics simulator and deployed zero-shot on the physical robot. MeowMentum achieved feet-down orientation within 1&nbsp;m of free fall from a range of initial orientations. With active spine motion in both morphologies, we compared the matched tail and no-tail configurations across pitch and roll release conditions. Adding tail actuation improved self-righting performance overall and across roll releases, while its additional benefit across pitch releases was less clear. These results indicate that the contribution of tail actuation to self-righting depends on the initial release orientation.</p></div>
         </div>
       </div>
     </div>
@@ -138,11 +109,7 @@
   <section class="block page" id="drops">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Hardware drops</p>
-        <h2>Same release, with and without the tail</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p>Each drop is released by hand from about 2.8&nbsp;m, at an orientation set using the robot's own IMU readout, and caught in a blanket. The robot detects free fall when its measured acceleration drops below 3.5&nbsp;m/s² and has about 0.8&nbsp;s, until it reaches the blanket, to right itself.</p>
+        <h2>Drops</h2>
       </div>
       <div class="compare wide mt-fig" data-reveal>
         <div class="compare-bar">
@@ -167,17 +134,14 @@
             <div class="clip-frame">
               <video id="clip-notail" muted loop playsinline preload="metadata" aria-label="Drop without the tail"></video>
             </div>
-            <figcaption><span><i class="swatch notail"></i>No tail</span><span class="mono">1.71 kg</span></figcaption>
           </figure>
           <figure class="clip">
             <div class="clip-frame">
               <video id="clip-tail" muted loop playsinline preload="metadata" aria-label="Drop with the tail"></video>
             </div>
-            <figcaption><span><i class="swatch tail"></i>With tail</span><span class="mono">1.86 kg</span></figcaption>
           </figure>
         </div>
         <div class="progress" aria-hidden="true"><i id="clip-progress"></i></div>
-        <p class="note center">Slow motion at an uncalibrated rate, and some clips were released from lower than others, so compare postures rather than timing; the replay below is timed from the robot's own log. Both clips start just before release and loop together.</p>
       </div>
     </div>
   </section>
@@ -186,21 +150,14 @@
   <section class="block page" id="robot">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Robot</p>
-        <h2>A spine that bends and twists, and a tail that swings</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p>Two cylindrical body segments are joined by a 2-DoF spine. A pitch joint bends the body. Two roll joints, one at each segment, are driven by a single coupled command, so the front and rear sections turn in the same sense about their own long axes. Once the spine is bent those axes are no longer parallel, and the coordinated roll reorients the whole body without an external moment. This follows the falling-cat model of Kane and Scher.</p>
-        <p>The tail is a second, lizard-like strategy. Accelerating it about the pitch axis makes the rest of the robot rotate the other way to conserve angular momentum. It also changes the robot's inertia, so the same spine motion produces a different body rotation with and without the tail.</p>
+        <h2>Robot</h2>
       </div>
       <div class="robot-grid wide mt-fig" data-reveal>
         <figure class="plate">
           <div class="plate-img"><img src="assets/img/robot.jpg" alt="The robot on a black backdrop: two black cylindrical body segments joined by an articulated spine with exposed motors and wiring, a threaded tail rod rising from the rear segment, compliant feet with red tips, and a 10 cm scale bar" width="1050" height="699" loading="lazy"></div>
-          <figcaption>The robot with its tail fitted. Compliant thermoplastic polyurethane shells and feet absorb landing impacts; the feet define the feet-down orientation.</figcaption>
         </figure>
         <figure class="plate">
           <div class="plate-img light"><img src="assets/img/cad.png" alt="Exploded CAD view labelling the tail joint q_t in green, the pitch joint q_p in red, and the coupled roll joints q_r1 and q_r2 in blue" width="760" height="500" loading="lazy"></div>
-          <figcaption>Joint layout: coupled roll joints <span class="tex" data-tex="q_{r1}, q_{r2}" style="color:var(--roll)">q_r1, q_r2</span>, pitch joint <span class="tex" data-tex="q_p" style="color:var(--pitch)">q_p</span> and tail joint <span class="tex" data-tex="q_t" style="color:var(--tailj)">q_t</span>.</figcaption>
         </figure>
       </div>
       <dl class="spec wide" data-reveal>
@@ -220,11 +177,7 @@
   <section class="block page" id="method">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Method</p>
-        <h2>Trained in simulation, deployed zero-shot</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p>The righting dynamics change with every joint configuration, so rather than prescribing a fixed manoeuvre we learn a closed-loop controller for each morphology through the same pipeline.</p>
+        <h2>Method</h2>
       </div>
       <figure class="method-fig wide mt-fig" data-reveal>
         <div class="pipeline-wrap">
@@ -419,7 +372,6 @@
           <img class="sim k6" src="assets/img/method/sim_6.jpg" width="236" height="180" loading="lazy" alt="Simulation, snapshot 6 of 6">
           <img class="real k6" src="assets/img/method/real_6.jpg" width="236" height="180" loading="lazy" alt="Hardware drop, snapshot 6 of 6">
         </div>
-        <figcaption>Top: training and deployment. Bottom: the same release, roll 180° and pitch 45° with the tail, in simulation and in a hardware drop, read left to right.</figcaption>
       </figure>
     </div>
   </section>
@@ -428,11 +380,7 @@
   <section class="block page" id="replay">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Telemetry replay</p>
-        <h2>Replay any drop from the robot's own sensors</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p>During every drop the robot logged its front-body orientation from the IMU and all four joint encoders at 50&nbsp;Hz. That is enough to rebuild the full pose, because the rear segment follows from the joint chain. Pick a release and a drop, drag to orbit, or switch to a simulated rollout of the same configuration.</p>
+        <h2>Replay</h2>
       </div>
       <div class="replay wide mt-fig" id="replay-app" data-reveal>
         <div class="stage3d" id="stage3d">
@@ -474,7 +422,6 @@
             <div class="jrow tail" id="jr-tail"><span>tail q<sub>t</sub></span><div class="jbar"><i id="jb-tail"></i></div><b id="jv-tail">–</b></div>
           </div>
           <div class="minichart" id="r-chart"></div>
-          <p class="mini-note" id="r-chart-note">Line: this drop, up to impact. Band: hardware mean ± SD for this release, first 0.64 s. Dashed: 2.5 m scoring point.</p>
         </div>
         <div class="timeline">
           <button class="play" type="button" id="r-play" aria-label="Pause">
@@ -492,7 +439,6 @@
           </div>
         </div>
       </div>
-      <p class="note wide mt-tight" id="r-note" data-reveal>Hardware log: front-body orientation from the IMU and four joint encoders at 50 Hz; the rear segment is rebuilt from the joint chain. Heading is not observable from gravity, so each replay is turned to start facing the same way. Each replay ends at impact, the peak deceleration in the blanket, 0.70–0.85 s after free-fall detection; the samples logged after it are not shown. Distance is the ballistic estimate ½gt² from free-fall detection, so near impact it can exceed the nominal 2.8 m drop. Scores are taken at 2.5 m of fall, before impact.</p>
     </div>
   </section>
 
@@ -500,11 +446,7 @@
   <section class="block page" id="results">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Results</p>
-        <h2>On average feet down within a metre with the tail, and straighter</h2>
-      </div>
-      <div class="prose" data-reveal>
-        <p>The roll sweep released the robot at 45°, 90° and 180° of roll with zero pitch. The pitch sweep held roll at 180° and pitched the nose down by 0°, 15°, 30° and 45°. From every release, both configurations turned rapidly toward feet-down, and the mean tilt changed little after that. Recovery was slowest from the 180° roll releases: without the tail, the roll 180°, pitch 0° drops still averaged about 54° at 2&nbsp;m, above the 45° feet-down threshold.</p>
+        <h2>Results</h2>
       </div>
 
       <div class="wide mt-fig" data-reveal>
@@ -513,15 +455,6 @@
           <figure class="chart"><div class="chart-title">With tail</div><div id="tilt-tail"></div></figure>
           <figure class="chart"><div class="chart-title">No tail</div><div id="tilt-notail"></div></figure>
         </div>
-        <p class="note mt-tight">Mean body tilt (the summed absolute roll and pitch of the front and rear segments, averaged over the two) against time since free-fall detection. Lines show the mean and bands ±1 SD over 6–7 drops per release; grey guides mark 1&nbsp;m and 2&nbsp;m of free fall. Hover or tap a legend entry to isolate a release.</p>
-      </div>
-
-      <div class="prose mt-fig" data-reveal>
-        <p>Pooled over all releases (36 drops with the tail and 37 without, including one short drop excluded from scoring), the mean body tilt after <strong>1&nbsp;m</strong> of free fall was <strong class="num">42.3 ± 22.5°</strong> with the tail and <strong class="num">51.2 ± 24.7°</strong> without it. After <strong>2&nbsp;m</strong> it was <strong class="num">29.6 ± 14.2°</strong> and <strong class="num">35.6 ± 18.2°</strong> (mean ± SD across drops).</p>
-        <h3 class="mt-tight">Whole-cat score</h3>
-        <p>Righting needs both an upright body and an aligned one; a robot whose front half lands upright while its rear half is twisted has not recovered. Each drop is therefore scored as the product of two terms in [0,&nbsp;1], so that neither can make up for the other:</p>
-        <div class="eq" data-tex="\begin{gathered} S_{\text{whole}} = S_{\text{upright}}\times S_{\text{align}} \\ S_{\text{align}} = 1-\frac{\theta}{\pi} \end{gathered}">S_whole = S_upright × S_align,  S_align = 1 − θ/π</div>
-        <p>Here <span class="tex" data-tex="S_{\text{upright}}">S_upright</span> scores the mean up-vector of the two segments against gravity, and <span class="tex" data-tex="\theta">θ</span> is the rotation angle between the front and rear segments. Both are evaluated after 2.5&nbsp;m of free fall. A score of one means the robot is fully upright and fully straight.</p>
       </div>
 
       <div class="wide mt-fig" data-reveal>
@@ -530,7 +463,6 @@
           <figure class="chart"><div class="chart-title">Roll sweep <span class="sub">pitch 0°</span></div><div id="score-roll"></div></figure>
           <figure class="chart"><div class="chart-title">Pitch sweep <span class="sub">roll 180°</span></div><div id="score-pitch"></div></figure>
         </div>
-        <p class="note mt-tight">Whole-cat score per drop. Boxes show the median and interquartile range, whiskers extend to 1.5 × IQR, and points are individual drops (n = 5–7 per group). Select a point, or focus it and press Enter, to replay that drop.</p>
       </div>
 
       <div class="wide mt-fig" data-reveal>
@@ -546,11 +478,6 @@
             </tbody>
           </table>
         </div>
-        <p class="table-note">Raw scores are mean ± sample SD, with the number of drops in brackets. The adjusted effect is the with-tail minus no-tail outcome after controlling for release condition, collection date, initial posture and initial angular speed, with heteroskedasticity-consistent (HC3) standard errors. The overall comparison is the primary analysis. The sweep values are Holm-adjusted within a family of three secondary tests: the two sweeps and a pitch-levelling test reported in the repository. The blocked permutation test shuffles tail labels within release-condition × date blocks.</p>
-      </div>
-
-      <div class="prose mt-fig" data-reveal>
-        <p>Decomposing the score shows that the improvement came mainly from better <strong>alignment between the front and rear segments</strong>. With the tail, the robot less often ended up with one half upright while the body stayed bent or twisted. Its raw scores also varied less from drop to drop (SD 0.090 against 0.155), although this difference was not tested statistically.</p>
       </div>
     </div>
   </section>
@@ -559,8 +486,7 @@
   <section class="block page" id="cite">
     <div class="grid">
       <div class="section-head" data-reveal>
-        <p class="eyebrow">Citation</p>
-        <h2>BibTeX</h2>
+        <h2>Citation</h2>
       </div>
       <div class="bib-wrap" data-reveal>
         <pre class="bib" id="bibtex">@inproceedings{meowmentum,
@@ -591,7 +517,6 @@
 <div class="tip" id="tip" aria-hidden="true"></div>
 
 <script src="assets/data/page-data.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" crossorigin="anonymous" defer></script>
 <script src="js/site.js" defer></script>
 <script type="module">
   // Load the 3D replay (and three.js) only when its section comes near the viewport.

@@ -272,13 +272,8 @@ function pose(r, q, j) {
   r.tail.rotation.set(0, j[3], 0);
 }
 
-function isDark() {
-  return (document.documentElement.getAttribute("data-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
-}
 function applyTheme() {
-  const dark = isDark();
-  mats.shell.color.set(dark ? 0x30353d : 0x2a2f37);
+  mats.shell.color.set(0x2a2f37);
   mats.foot.color.set(css("--foot") || "#d8463b");
   for (const k of ["roll", "pitch", "tail"]) {
     const c = css(k === "tail" ? "--tailj" : "--" + k);
@@ -286,15 +281,11 @@ function applyTheme() {
     mats[k].emissive.set(c);
   }
   ghostMat.color.set(css("--muted") || "#5f6876");
-  ghostMat.opacity = dark ? 0.35 : 0.3;
   ringMat.color.set(css("--line-strong") || "#c9d0d8");
   plumb.material.color.set(css("--muted") || "#5f6876");
-  ground.material.opacity = dark ? 0.4 : 0.16;
-  hemi.intensity = dark ? 0.5 : 0.55;
   drawMini();
   requestRender();
 }
-window.addEventListener("mm-theme", applyTheme);
 
 /* ---------------- series selection ---------------- */
 function headingFix(q0) {
@@ -361,9 +352,6 @@ seg("r-morph", "morph", () => { state.id = null; load(); });
 seg("r-speed", "speed");
 if (!sims.length) document.querySelector('#r-source button[data-v="sim"]').disabled = true;
 
-const HW_NOTE = "Hardware log: front-body orientation from the IMU and four joint encoders at 50 Hz; the rear segment is rebuilt from the joint chain. Heading is not observable from gravity, so each replay is turned to start facing the same way. Each replay ends at impact, the peak deceleration in the blanket, 0.70–0.85 s after free-fall detection; the samples logged after it are not shown. Distance is the ballistic estimate ½gt² from free-fall detection, so near impact it can exceed the nominal 2.8 m drop. Scores are taken at 2.5 m of fall, before impact.";
-const SIM_NOTE = "Simulation: one MuJoCo rollout of this configuration's student policy with nominal physics and clean sensing, released at rest with a straight spine and run for the full one-second episode, further than the 2.8 m hardware drop. Simulated rollouts are not scored.";
-
 function syncUI() {
   const cond = condByKey(state.cond);
   const hwMode = state.source === "hw";
@@ -394,14 +382,6 @@ function syncUI() {
     ? (series && series.policy === "tail" ? "with-tail policy" : "no-tail policy")
     : (state.morph === "tail" ? "with-tail" : "no-tail") + " student";
   $("#jr-tail").classList.toggle("off", state.morph !== "tail");
-  let note = hwMode ? HW_NOTE : SIM_NOTE;
-  if (!hwMode && state.morph === "notail" && cond.roll === 180) note += " From the 180° roll releases the simulated no-tail student is not feet-down (mean tilt above 45°) at 2.5 m of fall; from the pitched ones it does not get there within the one-second episode.";
-  $("#r-note").textContent = note;
-  $("#r-chart-note").textContent = hwMode
-    ? "Line: this drop, up to impact. Band: hardware mean ± SD for this release, first 0.64 s. Dashed: 2.5 m scoring point."
-    : "Line: the simulated rollout. Band: hardware drops of this configuration and release (mean ± SD, first 0.64 s)" +
-      (state.morph === "notail" && cond.roll === 180 && cond.pitch > 0 ? ", all flown with the with-tail policy" : "") +
-      ". Dashed: 2.5 m of fall, where hardware drops are scored.";
   $("#hud-left").dataset.short = (hwMode ? "Log" : "Sim") + " · " + (state.morph === "tail" ? "tail" : "no tail");
   drawMarks();
 }
