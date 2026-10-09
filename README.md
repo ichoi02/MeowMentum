@@ -2,7 +2,7 @@
 
 **A multi-strategy aerial self-righting robot for evaluating the contribution of an actuated tail across fall conditions.**
 
-[Project page](https://ichoi02.github.io/MeowMentumV2/) · [Drop data](data/hardware_trials) · [Analysis](analysis)
+[Project page](https://ichoi02.github.io/MeowMentum/) · [Drop data](data/hardware_trials) · [Analysis](analysis)
 
 <p align="center"><img src="docs/assets/img/robot.jpg" width="640" alt="The robot: two black cylindrical body segments joined by an actuated spine, with a tail rod on the rear segment and red feet"></p>
 
@@ -149,7 +149,7 @@ The drop logs are kept exactly as recorded. [data/README.md](data/README.md) and
 ## Project page
 
 The page in `docs/` is static and has no build step. To publish it, open
-Settings → Pages, choose *Deploy from a branch*, and select this branch and the `/docs`
+Settings → Pages, choose *Deploy from a branch*, and select `main` and the `/docs`
 folder. To preview it locally, run `python -m http.server --directory docs` and open
 http://localhost:8000. `docs/assets/data/build_page_data.py` regenerates the page's data
 from `data/`, `results/` and the policies.
