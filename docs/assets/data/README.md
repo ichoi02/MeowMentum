@@ -23,7 +23,7 @@ Quaternions are `[w, x, y, z]` and rotate body to world. Joint vectors are alway
 | `included` | `false` only for `wt_roll_090deg_0816_rep03`, whose impact came before 2.5 m of fall |
 | `score`, `s_up`, `s_align` | whole-cat score `S_upright * S_align` and its two factors at 2.5 m of ballistic fall (`t0 + 0.714 s`, both body rotations SLERP-interpolated); `null` when excluded |
 | `policy` | policy that flew: `tail` if the tail command `Cmd_B1` is ever nonzero, else `notail` (the no-tail controller pins it to 0). This agrees with an ONNX replay of every log. 19 `notail` drops flew the `tail` policy |
-| `impact_t` | s from the first sample to blanket impact (the front accelerometer peak); samples after it are post-landing |
+| `impact_t` | s from the first sample to the last sample before the robot touches the blanket. Contact is where the front accelerometer starts the run of readings at or above 20 m/s² that leads to its peak; samples after `impact_t` are in contact |
 | `c` | commanded joint targets [rot1, pitch, rot2, tail] in rad for each sample: the filtered, range-mapped policy output sent to the PD loops (`Cmd_F1`, `Cmd_F2`, `Cmd_B2`, `Cmd_B1`; in `sim`, the env's target for the step taken from that sample) |
 | `t` | seconds since the first sample (free-fall detection) |
 | `q` | front-body world quaternion per sample (`F_Q0..F_Q3`, as logged) |

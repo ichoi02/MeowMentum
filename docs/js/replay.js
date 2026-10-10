@@ -41,7 +41,8 @@ function representative(list) {
   return scored.reduce((best, t) => (Math.abs(t.score - med) < Math.abs(best.score - med) ? t : best), scored[0]);
 }
 
-const state = { source: "hw", morph: "tail", cond: "p45", id: null, t: 0, playing: !reduceMotion, speed: 0.25, hold: 0, rewind: 0 };
+const state = { source: "hw", morph: "tail", cond: "p30", id: null, t: 0, playing: !reduceMotion, speed: 0.25, hold: 0 };
+state.id = (trialsFor(state.morph, condByKey(state.cond))[0] || {}).id;   // default: drop 1
 let series = null;      // { t[], q[], j[], tilt[], impact_t? }
 let qs = [];            // THREE.Quaternion per sample (heading-normalised)
 
@@ -121,11 +122,11 @@ const mats = {
   metal: new THREE.MeshStandardMaterial({ color: 0xb8bec6, roughness: 0.3, metalness: 0.8 }),
   housing: new THREE.MeshStandardMaterial({ color: 0x8f969f, roughness: 0.38, metalness: 0.6 }),
   foot: new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.0 }),
-  roll: new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.1, emissiveIntensity: 0.3 }),
-  pitch: new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.1, emissiveIntensity: 0.3 }),
-  tail: new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.1, emissiveIntensity: 0.3 }),
+  // joint arrows: unlit and not tone-mapped, so they show the CAD figure's colours exactly
+  roll: new THREE.MeshBasicMaterial({ toneMapped: false }),
+  pitch: new THREE.MeshBasicMaterial({ toneMapped: false }),
+  tail: new THREE.MeshBasicMaterial({ toneMapped: false }),
 };
-const ghostMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.3, depthWrite: false });
 
 function shellGeometry(dir) {
   // lathe profile: flat inner face, cylindrical side, domed outer end. dir = -1 dome at -x, +1 dome at +x
@@ -152,23 +153,18 @@ const GEO = {
   rod: new THREE.CylinderGeometry(0.0055, 0.0055, 0.2, 14).rotateZ(-Math.PI / 2).translate(0.1, 0, 0),
   tip: new THREE.CylinderGeometry(0.012, 0.012, 0.036, 18).rotateZ(-Math.PI / 2).translate(0.182, 0, 0),
 };
-const EDGES = new Map();
-function edges(geo) {
-  if (!EDGES.has(geo)) EDGES.set(geo, new THREE.EdgesGeometry(geo, 35));
-  return EDGES.get(geo);
-}
-
-function part(geo, mat, parent, pos, ghost) {
-  const m = ghost ? new THREE.LineSegments(edges(geo), ghostMat) : new THREE.Mesh(geo, mat);
+function part(geo, mat, parent, pos) {
+  const m = new THREE.Mesh(geo, mat);
   if (pos) m.position.set(pos[0], pos[1], pos[2]);
-  if (!ghost) { m.castShadow = true; m.receiveShadow = true; }
+  m.castShadow = true;
+  m.receiveShadow = true;
   parent.add(m);
   return m;
 }
 /* Joint arrows: a thin arc around each joint axis from the measured angle to the
    commanded target, with the head at the target. Arcs live in the joint's parent
    frame, where "angle 0" is a fixed reference direction. */
-const ARROW = { tube: 0.0021, head: 0.0062, headLen: 0.018, minRad: 0.05 };
+const ARROW = { tube: 0.00315, head: 0.0062, headLen: 0.018, minRad: 0.05 };
 const arcCache = new Map();
 function arcGeo(R, deg) {
   const key = R + ":" + deg;
@@ -219,34 +215,31 @@ function setArrow(a, q, target) {
   a.head.position.set(a.R * Math.cos(end), a.R * Math.sin(end), 0).addScaledVector(_tan, -ARROW.headLen / 2);
 }
 
-function buildRobot(ghost) {
+function buildRobot() {
   const front = new THREE.Group();
-  part(GEO.front, mats.shell, front, [0, 0, 0], ghost);
-  if (!ghost) {
-    part(GEO.foot, mats.foot, front, [-0.034, 0.03, -0.052]);
-    part(GEO.foot, mats.foot, front, [-0.034, -0.03, -0.052]);
-  }
+  part(GEO.front, mats.shell, front, [0, 0, 0]);
+  part(GEO.foot, mats.foot, front, [-0.034, 0.03, -0.052]);
+  part(GEO.foot, mats.foot, front, [-0.034, -0.03, -0.052]);
   const s1 = new THREE.Group(); s1.position.set(0.1, 0, 0); front.add(s1);          // rot1 about x
-  if (!ghost) part(GEO.shaft, mats.metal, s1, [-0.026, 0, 0]);
+  part(GEO.shaft, mats.metal, s1, [-0.026, 0, 0]);
   const s2 = new THREE.Group(); s1.add(s2);                                           // pitch about y
-  if (!ghost) {
-    part(GEO.housing, mats.housing, s2, [0, 0, 0]);
-    part(GEO.shaft, mats.metal, s2, [0.026, 0, 0]);
-  }
+  part(GEO.housing, mats.housing, s2, [0, 0, 0]);
+  part(GEO.shaft, mats.metal, s2, [0.026, 0, 0]);
   const rear = new THREE.Group(); rear.position.set(0.1, 0, 0); s2.add(rear);       // rot2 about x
-  part(GEO.rear, mats.shell, rear, [0, 0, 0], ghost);
-  if (!ghost) {
-    part(GEO.foot, mats.foot, rear, [0.034, 0.03, -0.052]);
-    part(GEO.foot, mats.foot, rear, [0.034, -0.03, -0.052]);
-  }
+  part(GEO.rear, mats.shell, rear, [0, 0, 0]);
+  part(GEO.foot, mats.foot, rear, [0.034, 0.03, -0.052]);
+  part(GEO.foot, mats.foot, rear, [0.034, -0.03, -0.052]);
   const tail = new THREE.Group(); tail.position.set(0.05, 0, 0); rear.add(tail);    // tail about y
-  part(GEO.rod, mats.metal, tail, [0, 0, 0], ghost);
-  part(GEO.tip, mats.metal, tail, [0, 0, 0], ghost);
-  const arrows = ghost ? null : {
-    rot1: makeArrow(front, [0.07, 0, 0], ARC_ROLL, 0.08, mats.roll),
-    pitch: makeArrow(s1, [0, 0, 0], ARC_PITCH, 0.074, mats.pitch),
-    rot2: makeArrow(s2, [0.036, 0, 0], ARC_ROLL, 0.08, mats.roll),
-    tail: makeArrow(rear, [0.05, 0, 0], ARC_TAIL, 0.115, mats.tail),
+  part(GEO.rod, mats.metal, tail, [0, 0, 0]);
+  part(GEO.tip, mats.metal, tail, [0, 0, 0]);
+  // Both roll arrows show a body shell turning relative to the spine housing, so the front
+  // one lives in the housing frame (s1) and is driven with -q_r1; rot2 = -rot1 then makes the
+  // two roll arrows turn the same way, as in the CAD figure.
+  const arrows = {
+    rot1: makeArrow(s1, [-0.03, 0, 0], ARC_ROLL, 0.06, mats.roll),
+    pitch: makeArrow(s1, [0, 0, 0], ARC_PITCH, 0.0555, mats.pitch),
+    rot2: makeArrow(s2, [0.036, 0, 0], ARC_ROLL, 0.06, mats.roll),
+    tail: makeArrow(rear, [0.05, 0, 0], ARC_TAIL, 0.08625, mats.tail),
   };
   return { front, s1, s2, rear, tail, arrows };
 }
@@ -255,10 +248,8 @@ function buildRobot(ghost) {
 const world = new THREE.Group();
 world.rotation.x = -Math.PI / 2;
 scene.add(world);
-const robot = buildRobot(false);
-const ghost = buildRobot(true);
+const robot = buildRobot();
 world.add(robot.front);
-world.add(ghost.front);
 
 const SPINE = new THREE.Vector3(0.1, 0, 0);
 const _v = new THREE.Vector3();
@@ -278,9 +269,7 @@ function applyTheme() {
   for (const k of ["roll", "pitch", "tail"]) {
     const c = css(k === "tail" ? "--tailj" : "--" + k);
     mats[k].color.set(c);
-    mats[k].emissive.set(c);
   }
-  ghostMat.color.set(css("--muted") || "#5f6876");
   ringMat.color.set(css("--line-strong") || "#c9d0d8");
   plumb.material.color.set(css("--muted") || "#5f6876");
   drawMini();
@@ -294,9 +283,10 @@ function headingFix(q0) {
   if (Math.hypot(ax.x, ax.y) < 0.2) return new THREE.Quaternion();
   return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.atan2(ax.y, ax.x));
 }
-// Hardware replays end exactly at impact (the accelerometer peak in the blanket, itself a
-// logged sample); simulated rollouts have no landing and run the full episode.
-const endT = () => (state.source === "hw" && series.impact_t != null ? series.impact_t : series.t[series.t.length - 1]);
+// Every replay ends after 2.5 m of fall, the whole-cat scoring instant. A hardware drop
+// that touches the blanket before that ends at its last sample before contact (impact_t).
+const contactCut = () => state.source === "hw" && series.impact_t != null && series.impact_t < T_EVAL;
+const endT = () => Math.min(contactCut() ? series.impact_t : T_EVAL, series.t[series.t.length - 1]);
 
 function load() {
   const cond = condByKey(state.cond);
@@ -312,11 +302,9 @@ function load() {
   const fix = headingFix(raw[0]);
   qs = raw.map((q) => fix.clone().multiply(q));
   for (let i = 1; i < qs.length; i++) if (qs[i].dot(qs[i - 1]) < 0) qs[i].set(-qs[i].x, -qs[i].y, -qs[i].z, -qs[i].w);
-  pose(ghost, qs[0], series.j[0]);
-  robot.tail.visible = ghost.tail.visible = state.morph === "tail";
+  robot.tail.visible = state.morph === "tail";
   state.t = 0;
   state.hold = 0;
-  state.rewind = 0;
   syncUI();
   drawMini();
   frame(0);
@@ -415,7 +403,6 @@ playBtn.addEventListener("click", () => {
   if (!state.playing && series && state.t >= endT()) state.t = 0;
   state.playing = !state.playing;
   state.hold = 0;
-  state.rewind = 0;
   setPlayIcon();
   requestRender();
 });
@@ -423,7 +410,6 @@ const scrub = $("#r-scrub");
 scrub.addEventListener("input", () => {
   if (!series) return;
   state.playing = false;
-  state.rewind = 0;
   setPlayIcon();
   state.t = (scrub.value / 1000) * endT();
   frame(0);
@@ -456,9 +442,10 @@ function drawMini() {
   const ref = (DATA.tilt || []).find((c) => c.morph === state.morph && c.roll === cond.roll && c.pitch === cond.pitch);
   const col = `var(--c-${cond.key})`;
   if (ref) {
+    const n = ref.t.filter((t) => t <= T + 1e-9).length;
     let d = "";
-    ref.t.forEach((t, i) => { d += (i ? "L" : "M") + mx(t).toFixed(1) + "," + my(ref.mean[i] + ref.sd[i]).toFixed(1); });
-    for (let i = ref.t.length - 1; i >= 0; i--) d += "L" + mx(ref.t[i]).toFixed(1) + "," + my(ref.mean[i] - ref.sd[i]).toFixed(1);
+    for (let i = 0; i < n; i++) d += (i ? "L" : "M") + mx(ref.t[i]).toFixed(1) + "," + my(ref.mean[i] + ref.sd[i]).toFixed(1);
+    for (let i = n - 1; i >= 0; i--) d += "L" + mx(ref.t[i]).toFixed(1) + "," + my(ref.mean[i] - ref.sd[i]).toFixed(1);
     svg("path", { d: d + "Z", style: `fill:${col};fill-opacity:.16;stroke:none` }, s);
   }
   if (T_EVAL <= T) svg("line", { x1: mx(T_EVAL), x2: mx(T_EVAL), y1: mm.t, y2: MH - mm.b, class: "guide" }, s);
@@ -467,7 +454,7 @@ function drawMini() {
     if (t <= T + 1e-9) line += (line ? "L" : "M") + mx(t).toFixed(1) + "," + my(series.tilt[i]).toFixed(1);
   });
   svg("path", { d: line, style: `fill:none;stroke:${col};stroke-width:2;stroke-linejoin:round` }, s);
-  if (state.source === "hw" && series.impact_t != null) {
+  if (contactCut()) {
     svg("text", { x: MW - mm.r, y: mm.t + 2, "text-anchor": "end", text: "impact", style: "font-size:10px;fill:var(--pitch)" }, ax);
   }
   miniHead = svg("line", { x1: mm.l, x2: mm.l, y1: mm.t, y2: MH - mm.b, style: "stroke:var(--ink);stroke-width:1" }, s);
@@ -492,15 +479,14 @@ function setBar(id, v, range) {
   el.style.left = (f < 0 ? 50 + f : 50) + "%";
   el.style.width = Math.abs(f) + "%";
 }
-const REWIND = 0.45;   // s, eased return to the release pose between loops
+const HOLD = 0.9;   // s on the impact frame before the replay restarts from release
 function frame(dt) {
   if (!series) return;
   const T = endT();
   if (state.playing && dt > 0) {
     if (state.t >= T) {
       state.hold += dt;
-      if (state.hold > 0.9) state.rewind += dt;
-      if (state.rewind >= REWIND) { state.t = 0; state.hold = 0; state.rewind = 0; }
+      if (state.hold > HOLD) { state.t = 0; state.hold = 0; }
     } else {
       state.t = Math.min(T, state.t + dt * state.speed);
     }
@@ -508,28 +494,19 @@ function frame(dt) {
   const { i, u } = sample(state.t);
   _q.slerpQuaternions(qs[i], qs[i + 1], u);
   for (let k = 0; k < 4; k++) jv[k] = series.j[i][k] + (series.j[i + 1][k] - series.j[i][k]) * u;
-  if (state.rewind > 0) {
-    const e = Math.min(1, state.rewind / REWIND), w = e * e * (3 - 2 * e);
-    _q.slerp(qs[0], w);
-    for (let k = 0; k < 4; k++) jv[k] += (series.j[0][k] - jv[k]) * w;
-  }
   if (state.morph !== "tail") jv[3] = 0;
   pose(robot, _q, jv);
   if (series.c) {
     const c0 = series.c[i], c1 = series.c[i + 1];
     for (let k = 0; k < 4; k++) cv[k] = c0[k] + (c1[k] - c0[k]) * u;
-    const A = robot.arrows, show = state.rewind === 0;
-    if (show) {
-      setArrow(A.rot1, jv[0], cv[0]);
-      setArrow(A.pitch, jv[1], cv[1]);
-      setArrow(A.rot2, jv[2], cv[2]);
-      if (state.morph === "tail") setArrow(A.tail, jv[3], cv[3]); else A.tail.g.visible = false;
-    } else {
-      for (const a of Object.values(A)) a.g.visible = false;
-    }
+    const A = robot.arrows;
+    setArrow(A.rot1, -jv[0], -cv[0]);
+    setArrow(A.pitch, jv[1], cv[1]);
+    setArrow(A.rot2, jv[2], cv[2]);
+    if (state.morph === "tail") setArrow(A.tail, jv[3], cv[3]); else A.tail.g.visible = false;
   }
   const tilt = series.tilt[i] + (series.tilt[i + 1] - series.tilt[i]) * u;
-  const atImpact = state.source === "hw" && series.impact_t != null && state.t >= T - 1e-9;
+  const atImpact = contactCut() && state.t >= T - 1e-9;
   const d = 0.5 * G * state.t ** 2;
   $("#hud-right").innerHTML = atImpact
     ? `<b>${state.t.toFixed(3)} s</b> · impact`
@@ -554,14 +531,15 @@ function frame(dt) {
 let visible = false, last = 0, rafId = 0;
 function requestRender() { if (!rafId && visible) rafId = requestAnimationFrame(loop); }
 function loop(now) {
-  rafId = 0;
+  // rafId stays set while the frame runs, so the "change" event that controls.update()
+  // fires here cannot queue a second loop
   const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
   last = now;
   if (state.playing) frame(dt);
   const moved = controls.update();
   renderer.render(scene, camera);
-  if (visible && (state.playing || moved)) rafId = requestAnimationFrame(loop);
-  else last = 0;
+  rafId = visible && (state.playing || moved) ? requestAnimationFrame(loop) : 0;
+  if (!rafId) last = 0;
 }
 controls.addEventListener("change", requestRender);
 let lastMiniW = 0;

@@ -14,9 +14,9 @@
   --accent-weak: rgba(36, 86, 198, 0.09);
   --grey: #8a94a3;            /* no tail */
   --grey-weak: rgba(138, 148, 163, 0.16);
-  --roll: #2e93d6;            /* joint colours follow the CAD figure */
-  --pitch: #e2513a;
-  --tailj: #2b9a5e;
+  --roll: #2171b4;            /* joint colours of the CAD figure's arrows */
+  --pitch: #fc4e2a;
+  --tailj: #38b54a;
   --foot: #d8463b;
   --plate: #ffffff;           /* background of the white-ground paper figures */
   --shadow: 0 1px 2px rgba(15, 18, 23, 0.05), 0 8px 24px rgba(15, 18, 23, 0.06);
@@ -107,6 +107,7 @@ strong { color: var(--ink); font-weight: 600; }
 
 section.block { padding-block: clamp(56px, 8vw, 104px); border-top: 1px solid var(--line); }
 .section-head { display: grid; gap: 12px; }
+.section-sub { margin: 0; font-family: var(--f-display); font-size: var(--t-ui); color: var(--muted); }
 
 /* ---------- abstract (slides open) ---------- */
 .abstract h2 { margin: 0; }
@@ -415,17 +416,17 @@ table.results td:first-child { white-space: nowrap; color: var(--ink); font-weig
 .stage3d .hud {
   position: absolute; left: 14px; top: 12px; right: 14px; z-index: 1;
   display: flex; justify-content: space-between; gap: 12px; pointer-events: none;
-  font-family: var(--f-mono); font-size: var(--t-xs); color: var(--muted);
+  font-family: var(--f-display); font-size: var(--t-xs); color: var(--muted);
 }
 .stage3d .hud b { color: var(--ink); font-weight: 500; }
-.stage3d .hint { position: absolute; left: 14px; bottom: 12px; z-index: 1; font-family: var(--f-mono); font-size: 0.6875rem; color: var(--muted); pointer-events: none; transition: opacity 0.6s; }
+.stage3d .hint { position: absolute; left: 14px; bottom: 12px; z-index: 1; font-family: var(--f-display); font-size: 0.6875rem; color: var(--muted); pointer-events: none; transition: opacity 0.6s; }
 .stage3d .fallback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 24px; text-align: center; font-family: var(--f-display); font-size: var(--t-sm); color: var(--muted); }
 .panel { border-left: 1px solid var(--line); padding: 18px 18px 16px; display: grid; gap: 15px; align-content: start; min-width: 0; }
 .ctl { display: grid; gap: 7px; }
-.ctl > .lbl { font-family: var(--f-mono); font-size: 0.6875rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.ctl > .lbl { font-family: var(--f-display); font-size: var(--t-xs); font-weight: 550; color: var(--muted); }
 .conds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .conds button {
-  font-family: var(--f-mono); font-size: 0.71875rem; line-height: 1.25;
+  font-family: var(--f-display); font-size: 0.71875rem; line-height: 1.25;
   text-align: left;
   color: var(--ink-2);
   background: var(--bg);
@@ -441,20 +442,20 @@ table.results td:first-child { white-space: nowrap; color: var(--ink); font-weig
 .trials { display: flex; flex-wrap: wrap; gap: 6px; }
 .trials button {
   min-width: 34px; height: 30px; padding: 0 8px;
-  font-family: var(--f-mono); font-size: var(--t-xs);
+  font-family: var(--f-display); font-size: var(--t-xs);
   color: var(--ink-2); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
   transition: border-color 0.2s, background-color 0.2s;
 }
 .trials button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); background: var(--surface); }
 .trials button.excluded { text-decoration: line-through; color: var(--muted); }
-.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; font-family: var(--f-mono); font-size: var(--t-xs); }
+.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; font-family: var(--f-display); font-size: var(--t-xs); }
 .readout div { display: grid; gap: 1px; }
 .readout .wide-ro { grid-column: 1 / -1; }
 .readout span { color: var(--muted); font-size: 0.6875rem; }
 .readout b { color: var(--ink); font-weight: 500; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 .joints { display: grid; gap: 7px; }
-.jrow { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.6em; gap: 10px; align-items: center; font-family: var(--f-mono); font-size: var(--t-xs); color: var(--muted); }
+.jrow { display: grid; grid-template-columns: 6.2em minmax(0, 1fr) 5.6em; gap: 10px; align-items: center; font-family: var(--f-display); font-size: var(--t-xs); color: var(--muted); }
 .jrow span, .jrow b { white-space: nowrap; }
 .jrow b { color: var(--ink); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
 .jbar { position: relative; height: 6px; background: var(--sunken); border-radius: 3px; overflow: hidden; }
@@ -464,7 +465,7 @@ table.results td:first-child { white-space: nowrap; color: var(--ink); font-weig
 .jrow.pitch i { background: var(--pitch); }
 .jrow.tail i { background: var(--tailj); }
 .jrow.off { opacity: 0.4; }
-.minichart svg { width: 100%; height: auto; overflow: visible; font-family: var(--f-mono); }
+.minichart svg { width: 100%; height: auto; overflow: visible; font-family: var(--f-display); }
 .trials:empty { min-height: 30px; }
 .minichart:empty { min-height: 130px; }
 .timeline { grid-column: 1 / -1; border-top: 1px solid var(--line); padding: 12px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
@@ -473,7 +474,7 @@ table.results td:first-child { white-space: nowrap; color: var(--ink); font-weig
 .play svg { width: 14px; height: 14px; }
 .scrub { position: relative; height: 38px; display: grid; align-items: center; }
 .scrub input[type="range"] { width: 100%; margin: 0; accent-color: var(--ink); cursor: pointer; position: relative; z-index: 2; background: transparent; }
-.scrub .marks { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; font-family: var(--f-mono); font-size: 0.625rem; color: var(--muted); }
+.scrub .marks { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; font-family: var(--f-display); font-size: 0.625rem; color: var(--muted); }
 .scrub .marks span { position: absolute; top: -3px; transform: translateX(-50%); white-space: nowrap; }
 .scrub .marks i { position: absolute; bottom: 4px; width: 1px; height: 6px; background: var(--line-strong); }
 @media (max-width: 980px) {
