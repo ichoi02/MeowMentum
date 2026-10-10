@@ -42,7 +42,6 @@
       <span>MeowMentum</span>
     </a>
     <div class="nav-links">
-      <a href="#abstract">Abstract</a>
       <a href="#drops">Drops</a>
       <a href="#replay">Replay</a>
       <a href="#robot">Robot</a>
@@ -76,6 +75,12 @@
             Paper <span class="tag">after review</span>
           </span>
         </div>
+        <div class="abstract" id="abstract-box" data-load style="--d:540">
+          <button type="button" class="abstract-toggle" aria-expanded="true" aria-controls="abstract-body">Abstract<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="abstract-body" id="abstract-body">
+            <div class="abstract-inner"><p>Robots operating in unstructured environments may fall or overturn, and recovering an upright posture is critical for sustained operation. Inspired by the feline righting reflex, in which coordinated body and tail motions contribute to aerial reorientation, this work investigates the role of spine and tail actuation in aerial self-righting. We hypothesized that adding an actuated tail improves self-righting performance despite its added mass and mechanical complexity. To evaluate this hypothesis, we present MeowMentum, a 1.86&nbsp;kg self-righting robot that combines a two-degree-of-freedom (2-DoF) actuated spine with a one-degree-of-freedom (1-DoF) actuated tail, using onboard sensing and closed-loop control. Reinforcement learning-based controllers were trained in a physics simulator and deployed zero-shot on the physical robot. MeowMentum achieved feet-down orientation within 1&nbsp;m of free fall from a range of initial orientations. With active spine motion in both morphologies, we compared the matched tail and no-tail configurations across pitch and roll release conditions. Adding tail actuation improved self-righting performance overall and across roll releases, while its additional benefit across pitch releases was less clear. These results indicate that the contribution of tail actuation to self-righting depends on the initial release orientation.</p></div>
+          </div>
+        </div>
       </div>
       <figure class="hero-media">
         <div class="hero-frame">
@@ -88,18 +93,6 @@
       </figure>
     </div>
   </header>
-
-  <!-- ============ ABSTRACT ============ -->
-  <section class="block page" id="abstract">
-    <div class="grid">
-      <div class="abstract" id="abstract-box" data-reveal>
-        <h2><button type="button" class="abstract-toggle" aria-expanded="true" aria-controls="abstract-body">Abstract<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h2>
-        <div class="abstract-body" id="abstract-body">
-          <div class="abstract-inner"><p>Robots operating in unstructured environments may fall or overturn, and recovering an upright posture is critical for sustained operation. Inspired by the feline righting reflex, in which coordinated body and tail motions contribute to aerial reorientation, this work investigates the role of spine and tail actuation in aerial self-righting. We hypothesized that adding an actuated tail improves self-righting performance despite its added mass and mechanical complexity. To evaluate this hypothesis, we present MeowMentum, a 1.86&nbsp;kg self-righting robot that combines a two-degree-of-freedom (2-DoF) actuated spine with a one-degree-of-freedom (1-DoF) actuated tail, using onboard sensing and closed-loop control. Reinforcement learning-based controllers were trained in a physics simulator and deployed zero-shot on the physical robot. MeowMentum achieved feet-down orientation within 1&nbsp;m of free fall from a range of initial orientations. With active spine motion in both morphologies, we compared the matched tail and no-tail configurations across pitch and roll release conditions. Adding tail actuation improved self-righting performance overall and across roll releases, while its additional benefit across pitch releases was less clear. These results indicate that the contribution of tail actuation to self-righting depends on the initial release orientation.</p></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <!-- ============ DROPS (video comparison) ============ -->
   <section class="block page" id="drops">

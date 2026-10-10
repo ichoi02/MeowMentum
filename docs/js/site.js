@@ -61,6 +61,13 @@
     }
     set(false);
     btn.addEventListener("click", function () { set(!box.classList.contains("open")); });
+    // Close like a dropdown: on Escape, or on a click anywhere outside it
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && box.classList.contains("open")) { set(false); btn.focus(); }
+    });
+    document.addEventListener("click", function (e) {
+      if (box.classList.contains("open") && !box.contains(e.target)) set(false);
+    });
   })();
 
   /* ---------------- nav ---------------- */

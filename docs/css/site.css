@@ -109,21 +109,38 @@ section.block { padding-block: clamp(56px, 8vw, 104px); border-top: 1px solid va
 .section-head { display: grid; gap: 12px; }
 .section-sub { margin: 0; font-family: var(--f-display); font-size: var(--t-ui); color: var(--muted); }
 
-/* ---------- abstract (slides open) ---------- */
-.abstract h2 { margin: 0; }
+/* ---------- abstract (dropdown bar under the hero buttons) ----------
+   The panel overlays the content below, so opening it never shifts the hero. */
+.abstract { position: relative; z-index: 20; width: 100%; max-width: 34rem; }
 .abstract-toggle {
-  display: inline-flex; align-items: center; gap: 12px;
-  font: inherit; color: inherit; letter-spacing: inherit;
-  background: none; border: 0; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; height: 40px; padding: 0 12px 0 16px;
+  font-family: var(--f-display); font-size: var(--t-ui); font-weight: 550; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px;
+  cursor: pointer; transition: border-radius 0.2s var(--ease), box-shadow 0.25s var(--ease);
 }
-.abstract-toggle svg { width: 24px; height: 24px; color: var(--muted); transition: transform 0.45s var(--ease); }
+.abstract-toggle:hover { box-shadow: var(--shadow); }
+.abstract.open .abstract-toggle { border-radius: 12px 12px 0 0; box-shadow: var(--shadow); }
+.abstract-toggle svg { width: 18px; height: 18px; color: var(--muted); transition: transform 0.45s var(--ease); }
 .abstract.open .abstract-toggle svg { transform: rotate(180deg); }
 .abstract-toggle:hover svg { color: var(--ink); }
-.abstract-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.6s var(--ease); }
-.js .abstract:not(.open) .abstract-body { grid-template-rows: 0fr; }
+.abstract-body {
+  position: absolute; left: 0; right: 0; top: 100%;
+  display: grid; grid-template-rows: 1fr;
+  background: var(--surface);
+  border: 1px solid var(--line-strong); border-top: 0; border-radius: 0 0 12px 12px;
+  box-shadow: var(--shadow);
+  transition: grid-template-rows 0.5s var(--ease), border-color 0.3s, box-shadow 0.3s;
+}
+.js .abstract:not(.open) .abstract-body { grid-template-rows: 0fr; border-color: transparent; box-shadow: none; }
 .abstract-inner { overflow: hidden; min-height: 0; }
-.abstract-inner p { padding-top: 22px; max-width: 68ch; font-size: var(--t-body); line-height: 1.7; transition: opacity 0.5s var(--ease), transform 0.6s var(--ease); }
-.js .abstract:not(.open) .abstract-inner p { opacity: 0; transform: translateY(-10px); }
+.abstract-inner p {
+  margin: 0; padding: 14px 16px 16px;
+  max-height: min(60vh, 30rem); overflow-y: auto;
+  font-size: var(--t-ui); line-height: 1.65; color: var(--ink-2);
+  transition: opacity 0.4s var(--ease), transform 0.5s var(--ease);
+}
+.js .abstract:not(.open) .abstract-inner p { opacity: 0; transform: translateY(-6px); }
 
 /* ---------- nav ---------- */
 .nav {
@@ -583,8 +600,8 @@ footer.site { padding-block: 36px 48px; border-top: 1px solid var(--line); }
 
 /* ---------- print ---------- */
 @media print {
-  .js .abstract .abstract-body { grid-template-rows: 1fr; }
-  .js .abstract .abstract-inner p { opacity: 1; transform: none; }
+  .js .abstract .abstract-body { grid-template-rows: 1fr; position: static; box-shadow: none; }
+  .js .abstract .abstract-inner p { opacity: 1; transform: none; max-height: none; }
   [data-reveal].pre { opacity: 1 !important; transform: none !important; }
   .draw { stroke-dashoffset: 0 !important; }
   .fade-band, .pop { opacity: 1 !important; }
