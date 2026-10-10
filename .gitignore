@@ -10,8 +10,8 @@ venv/
 .vscode/
 .idea/
 
-# Training outputs: TensorBoard runs (train.py) and the timestamped checkpoints
-# written by train.py / distillation.py. The released policies keep their staged
+# Training outputs: TensorBoard runs (train/train.py) and the timestamped checkpoints
+# written by train/train.py / train/distillation.py. The released policies keep their staged
 # names (cat_controller*.zip/.onnx, student_policy*.pth) and are not matched here.
 run_logs/
 policies/*_20??????-??????.zip

@@ -54,7 +54,7 @@ bool ENCODER2_REVERSED = true;
 // ==========================================
 // PD gains = sim pd_nominal * 1024  (sim normalized torque [-1,1] -> PWM [0,1023]).
 // Front M1 = rot1 (roll): sim (kp=4.0, kd=0.4);  Front M2 = pitch: sim (kp=20.0, kd=1.0).
-// From the step-response sweep in tools/tune_pd_gains.py (see cat_env.py::pd_nominal);
+// From the step-response sweep in tools/tune_pd_gains.py (see train/cat_env/cat_env.py::pd_nominal);
 // the sweep reproduces the pitch/tail pair, the roll pair was kept at Kp 4, Kd 0.4.
 double Kp1 = 4096.0;
 double Kd1 = 409.6;
@@ -63,12 +63,12 @@ double Kd2 = 1024.0;
 
 // Position deadband in rad at the joint (not encoder ticks): while |target - position|
 // is within it the motor is stopped (INA = INB = LOW, PWM 0).
-// MUST match cat_env/env_util.py::MOTOR_DEADBAND.
+// MUST match train/cat_env/env_util.py::MOTOR_DEADBAND.
 float deadband = 0.03;
-// Velocity low-pass gain; MUST match cat_env/env_util.py::VEL_FILTER_ALPHA.
+// Velocity low-pass gain; MUST match train/cat_env/env_util.py::VEL_FILTER_ALPHA.
 const double VEL_ALPHA = 0.1;
 // Any nonzero command is floored to minPWM (10-bit PWM, 0..PWM_MAX).
-// MUST match cat_env/env_util.py::MOTOR_MIN_CMD = minPWM / PWM_MAX.
+// MUST match train/cat_env/env_util.py::MOTOR_MIN_CMD = minPWM / PWM_MAX.
 const int minPWM = 100;
 const int PWM_MAX = 1023;
 
@@ -293,7 +293,7 @@ void runController(double dt) {
   // (roll) / 3.8 mrad (pitch, tail) per tick at the joint. A single tick landing in
   // one 1 ms sample therefore reads as a 13.5 rad/s velocity, and Kd times that
   // saturates the command on quantization alone. VEL_ALPHA must match
-  // cat_env/env_util.py::VEL_FILTER_ALPHA so sim and hardware carry the same lag.
+  // train/cat_env/env_util.py::VEL_FILTER_ALPHA so sim and hardware carry the same lag.
   double velRaw1 = (currentPos1 - lastPos1) / dt;
   double velRaw2 = (currentPos2 - lastPos2) / dt;
   velFilt1 += VEL_ALPHA * (velRaw1 - velFilt1);

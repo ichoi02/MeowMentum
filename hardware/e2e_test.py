@@ -1,19 +1,15 @@
-"""
-End-to-end hardware-pipeline test (no physical hardware required).
+"""Check the robot's inference pipeline end to end on the MuJoCo sim (no hardware needed).
 
-Drives the MuJoCo Cat-v0 / CatNoTail-v0 sim as the "physical robot" and runs the
-ACTUAL hardware inference pipeline from controller.py (student_obs, policy_action,
-joint_targets: projected-gravity obs, previous action + step, ONNX inference, action
-low-pass, joint-range mapping). Verifies each stage matches the simulation/training
-pipeline, then confirms closed-loop righting.
+    python -m hardware.e2e_test                    # both variants
+    python -m hardware.e2e_test --variant notail
 
-The sim's front_body world-frame quaternion stands in for the front IMU (i.e. we
-assume the on-robot IMU alignment yields a z-up world frame); joint encoders are
-read from qpos. Everything downstream of that is the real controller code.
-
-Runs from any directory (needs pyserial, since it imports controller.py):
-    python hardware/e2e_test.py                    # both variants
-    python hardware/e2e_test.py --variant notail
+The Cat-v0 / CatNoTail-v0 sim stands in for the robot and drives the controller's own
+code (student_obs, policy_action, joint_targets). The checks: the observation width
+agrees across the chain, the ONNX export matches the PyTorch student, the controller
+observation matches the sim student observation, the controller filter and joint
+mapping match the target the sim executes, and the closed loop rights the robot.
+The sim's front_body world quaternion stands in for the aligned front IMU and the
+joint encoders are read from qpos. Needs pyserial, since it imports the controller.
 """
 import argparse
 import os
@@ -25,185 +21,240 @@ import torch
 import onnxruntime as ort
 from scipy.spatial.transform import Rotation as R
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "hardware"))
-
 import gymnasium as gym
-import cat_env  # noqa: F401  (registers Cat-v0 / CatNoTail-v0)
-import distillation as D
-import controller as C  # the real hardware controller
-from variants import VARIANTS, student_path, onnx_path
+import train.cat_env  # noqa: F401  (registers Cat-v0 and CatNoTail-v0)
+import train.distillation as D
+import hardware.controller as C
+from model.variants import VARIANTS, student_path, onnx_path
 
-# Floor for the closed-loop check. This is a coarse pipeline-breakage tripwire, not a
-# performance target: N=100 random release attitudes is noisy. The released students
-# score about 50-60/100 (tail) and 20-35/100 (no tail). A zero-action policy scores about
-# 4-13/100, because some releases start close to upright, so the floors sit above that
-# baseline: they catch a broken pipeline as well as a collapse to passivity.
+# Upright drops of 100 needed to pass, between zero action (4-13) and the students (20-60)
 RIGHTING_FLOOR = {"tail": 30, "notail": 15}
 
+# Outcome of every check run so far
 results = []
+
+
 def check(name, ok, detail=""):
+    """Print a check's PASS/FAIL line and record its outcome."""
     print(f"[{'PASS' if ok else 'FAIL'}] {name}  {detail}")
     results.append(ok)
 
 
-# ---- shared helpers: emulate the on-robot sensors ----
-def emulate_sensors(u):
-    """Front IMU quaternion (world frame) + 4 joint encoder angles, from sim state."""
-    front_quat = u.data.xquat[u._body_idx["front_body"]].copy()
-    qi = u._joint_qpos_idx
-    joints = np.array([u.data.qpos[qi["rot1"]], u.data.qpos[qi["pitch"]],
-                       u.data.qpos[qi["rot2"]], u.data.qpos[qi["tail"]]])
+def emulate_sensors(sim):
+    """Read the robot's sensors from the sim state.
+
+    Returns (front IMU quaternion [w, x, y, z] in the world frame,
+    joint angles [rot1, pitch, rot2, tail] in rad).
+    """
+    front_quat = sim.data.xquat[sim._body_idx["front_body"]].copy()
+    qpos_idx = sim._joint_qpos_idx
+    joints = np.array([sim.data.qpos[qpos_idx["rot1"]], sim.data.qpos[qpos_idx["pitch"]],
+                       sim.data.qpos[qpos_idx["rot2"]], sim.data.qpos[qpos_idx["tail"]]])
     return front_quat, joints
 
+
 def sim_student_frame(obs):
-    """Ground-truth student frame from the sim obs (front_proj_grav[0:3] + joints[12:16])."""
+    """Return the sim's student frame: front projected gravity obs[0:3] + joints obs[12:16]."""
     return np.concatenate([obs[0:3], obs[12:16]])
 
-def tilt_deg(u, body):
-    up = R.from_quat(u.data.xquat[u._body_idx[body]], scalar_first=True).apply([0, 0, 1])
+
+def tilt_deg(sim, body):
+    """Return the angle between a body's z axis and world up, in deg."""
+    up = R.from_quat(sim.data.xquat[sim._body_idx[body]], scalar_first=True).apply([0, 0, 1])
     return np.degrees(np.arccos(np.clip(up[2], -1.0, 1.0)))
 
 
-def run(variant):
-    """Run all checks for one variant. Returns True if every check passed."""
-    n_before = len(results)
-    cfg = VARIANTS[variant]
-    ONNX_FILE = onnx_path(variant)
-    PTH_FILE = student_path(variant)
-
-    print(f"\n=== variant={variant}  env={cfg['env_id']}  onnx={os.path.basename(ONNX_FILE)} ===")
-    print(f"obs={C.STUDENT_OBS_DIM}-dim  filter_alpha={C.FILTER_ALPHA}  "
-          f"ranges(roll/pitch/tail)={C.ROLL_RANGE}/{C.PITCH_RANGE}/{C.TAIL_RANGE}")
-
-    sess = ort.InferenceSession(ONNX_FILE)
-    inp = sess.get_inputs()[0].name
-    onnx_dim = sess.get_inputs()[0].shape[-1]
-
+def load_student(variant):
+    """Load the PyTorch student; record a FAIL and return None if the checkpoint is stale."""
+    pth_file = student_path(variant)
     student = D.StudentPolicy(D.STUDENT_OBS_DIM, 3)
     try:
-        student.load_state_dict(torch.load(PTH_FILE, map_location="cpu"))
+        student.load_state_dict(torch.load(pth_file, map_location="cpu"))
     except RuntimeError:
-        # Almost always a stale artifact rather than a real bug: the observation
-        # layout changed and this .pth predates it. Say so instead of dumping a
-        # size-mismatch traceback.
+        # A size mismatch: the .pth predates the current observation layout
         check("student checkpoint matches current obs layout", False,
-              f"{os.path.basename(PTH_FILE)} was built for a different observation "
-              f"width (expected {D.STUDENT_OBS_DIM}). Re-run distillation.py and "
-              f"onnx_conversion.py for --variant {variant}.")
-        return False
+              f"{os.path.basename(pth_file)} was built for a different observation "
+              f"width (expected {D.STUDENT_OBS_DIM}). Re-run train.distillation and "
+              f"hardware.onnx_conversion for --variant {variant}.")
+        return None
     student.eval()
+    return student
 
-    # ---- TEST 0: dimensions line up across the whole chain ----
-    check(f"dims consistent (controller/distill/onnx = {D.STUDENT_OBS_DIM})",
-          C.STUDENT_OBS_DIM == D.STUDENT_OBS_DIM == onnx_dim,
-          f"ctrl={C.STUDENT_OBS_DIM} distill={D.STUDENT_OBS_DIM} onnx={onnx_dim}")
 
-    # ---- TEST 1: ONNX == PyTorch student ----
-    X = np.random.randn(1000, D.STUDENT_OBS_DIM).astype(np.float32)
+def check_onnx_matches_torch(sess, input_name, student):
+    """Check that the ONNX export and the PyTorch student agree on random inputs."""
+    x = np.random.randn(1000, D.STUDENT_OBS_DIM).astype(np.float32)
     with torch.no_grad():
-        yt = student(torch.from_numpy(X)).numpy()
-    yo = sess.run(None, {inp: X})[0]
-    d1 = float(np.max(np.abs(yt - yo)))
-    check("ONNX == PyTorch student", d1 < 1e-4, f"max|diff|={d1:.2e}")
+        y_torch = student(torch.from_numpy(x)).numpy()
+    y_onnx = sess.run(None, {input_name: x})[0]
+    max_diff = float(np.max(np.abs(y_torch - y_onnx)))
+    check("ONNX == PyTorch student", max_diff < 1e-4, f"max|diff|={max_diff:.2e}")
 
-    env = gym.make(cfg["env_id"])
-    u = env.unwrapped
 
-    # ---- TEST 2: controller obs-build == sim student obs (over a rollout) ----
-    # Both sides are fed the same prev_action (tail zeroed for notail, as deployed).
-    # distillation.collect_data fed back the unzeroed tail command instead; that
-    # train/deploy difference is outside what this test compares.
+def check_obs_matches_sim(env, sess, input_name, variant):
+    """Check that the controller observation equals the sim student observation.
+
+    Both sides get the deployed prev_action, with the tail zeroed for no-tail; DAgger in
+    train/distillation.py fed back the unzeroed tail instead, which is not compared here.
+    """
+    # Fly the sim with the controller for 300 steps, comparing the observations at each one
+    sim = env.unwrapped
     obs, _ = env.reset()
-    prev_c = np.zeros(C.ACT_DIM)
-    prev_s = np.zeros(D.ACT_DIM)
+    prev_ctrl = np.zeros(C.ACT_DIM)
+    prev_sim = np.zeros(D.ACT_DIM)
     step_i = 0
-    maxdiff2 = 0.0
+    max_diff = 0.0
     for _ in range(300):
-        fq, jt = emulate_sensors(u)
-        ctrl_obs = C.student_obs(fq, jt, prev_c, step_i, variant)
-        sf = D.zero_tail(sim_student_frame(obs), variant)
-        sim_obs = D.build_student_obs(sf, prev_s, obs[D.STEP_IDX]).astype(np.float32)
-        maxdiff2 = max(maxdiff2, float(np.max(np.abs(ctrl_obs[0] - sim_obs))))
-        raw = C.policy_action(sess, inp, ctrl_obs, variant)
-        prev_c = raw.copy(); prev_s = raw.copy()
+        # Build both observations from the same sim state
+        front_quat, joints = emulate_sensors(sim)
+        ctrl_obs = C.student_obs(front_quat, joints, prev_ctrl, step_i, variant)
+        frame = D.zero_tail(sim_student_frame(obs), variant)
+        sim_obs = D.build_student_obs(frame, prev_sim, obs[D.STEP_IDX]).astype(np.float32)
+        max_diff = max(max_diff, float(np.max(np.abs(ctrl_obs[0] - sim_obs))))
+
+        # Step with the controller's action, starting a new episode when one ends
+        raw = C.policy_action(sess, input_name, ctrl_obs, variant)
+        prev_ctrl = raw.copy()
+        prev_sim = raw.copy()
         step_i += 1
         obs, _, term, trunc, _ = env.step(raw)
         if term or trunc:
             obs, _ = env.reset()
-            prev_c = np.zeros(C.ACT_DIM); prev_s = np.zeros(D.ACT_DIM); step_i = 0
-    check("controller obs == sim student obs", maxdiff2 < 1e-6, f"max|diff|={maxdiff2:.2e}")
+            prev_ctrl = np.zeros(C.ACT_DIM)
+            prev_sim = np.zeros(D.ACT_DIM)
+            step_i = 0
 
-    # ---- TEST 3: controller filter+map == sim internal executed target ----
-    # Disable the sim's domain-randomization action delay so the comparison is 1:1.
-    obs, _ = env.reset()
-    u.action_delay = 0
-    u.action_buffer = []
+    # Report the largest difference
+    check("controller obs == sim student obs", max_diff < 1e-6, f"max|diff|={max_diff:.2e}")
+
+
+def check_targets_match_sim(env):
+    """Check that the controller's filter and joint mapping equal the sim's executed target."""
+    # Turn off the sim's random action delay so each step compares one to one
+    sim = env.unwrapped
+    env.reset()
+    sim.action_delay = 0
+    sim.action_buffer = []
+
+    # Feed random actions to both and compare the [rot1, pitch, tail] targets
     rng = np.random.default_rng(0)
-    c_filt = np.zeros(3)
-    maxdiff3 = 0.0
-    n_cmp = 0
+    filt = np.zeros(3)
+    max_diff = 0.0
+    n_compared = 0
     for _ in range(300):
         raw = rng.uniform(-1, 1, 3).astype(np.float32)
-        # Controller path: per-channel low-pass, then the joint-range map.
-        c_targets, c_filt = C.joint_targets(raw, c_filt)
-        obs, _, term, trunc, _ = env.step(raw)
+        targets, filt = C.joint_targets(raw, filt)
+        _, _, term, trunc, _ = env.step(raw)
         if not (term or trunc):
-            sim_exec = np.asarray(u.ctrls[-1][:3])  # sim's mapped [rot1,pitch,tail] target
-            maxdiff3 = max(maxdiff3, float(np.max(np.abs(np.array(c_targets[:3]) - sim_exec))))
-            n_cmp += 1
+            sim_targets = np.asarray(sim.ctrls[-1][:3])
+            max_diff = max(max_diff, float(np.max(np.abs(np.array(targets[:3]) - sim_targets))))
+            n_compared += 1
         else:
-            obs, _ = env.reset()
-            u.action_delay = 0
-            u.action_buffer = []
-            c_filt = np.zeros(3)          # cat_env resets its filter per episode
-    check("controller filter+map == sim executed target", maxdiff3 < 1e-6,
-          f"max|diff|={maxdiff3:.2e} over {n_cmp} steps")
+            # New episode: the sim resets its filter, so the controller's starts over too
+            env.reset()
+            sim.action_delay = 0
+            sim.action_buffer = []
+            filt = np.zeros(3)
+    check("controller filter+map == sim executed target", max_diff < 1e-6,
+          f"max|diff|={max_diff:.2e} over {n_compared} steps")
 
-    # ---- TEST 4: closed-loop righting through the full hardware pipeline ----
-    # Build obs from emulated sensors -> ONNX -> feed to env (sim map+PD == controller+Teensy).
-    N = 100
-    ok = 0
-    ftilt, rtilt = [], []
-    infer_times = []
-    for _ in range(N):
-        obs, _ = env.reset()
-        prev_c = np.zeros(C.ACT_DIM)
+
+def check_closed_loop(env, sess, input_name, variant):
+    """Check that the full pipeline rights the robot in enough of 100 random drops.
+
+    Emulated sensors -> controller observation -> ONNX -> sim, whose joint mapping and
+    PD stand in for the controller's mapping and the Teensy PD. Closes env after the
+    last drop.
+    """
+    # Fly 100 random drops through the controller code
+    sim = env.unwrapped
+    n_drops = 100
+    n_upright = 0
+    front_tilts, rear_tilts = [], []
+    infer_ms = []
+    for _ in range(n_drops):
+        # Fly one drop, timing each inference
+        env.reset()
+        prev_action = np.zeros(C.ACT_DIM)
         step_i = 0
         done = False
         while not done:
-            fq, jt = emulate_sensors(u)
-            x = C.student_obs(fq, jt, prev_c, step_i, variant)
+            front_quat, joints = emulate_sensors(sim)
+            obs = C.student_obs(front_quat, joints, prev_action, step_i, variant)
             t0 = time.perf_counter()
-            raw = C.policy_action(sess, inp, x, variant)
-            infer_times.append((time.perf_counter() - t0) * 1e3)
-            prev_c = raw.copy()
+            raw = C.policy_action(sess, input_name, obs, variant)
+            infer_ms.append((time.perf_counter() - t0) * 1e3)
+            prev_action = raw.copy()
             step_i += 1
-            obs, _, term, trunc, _ = env.step(raw)
+            _, _, term, trunc, _ = env.step(raw)
             done = term or trunc
-        fa, ra = tilt_deg(u, "front_body"), tilt_deg(u, "rear_body")
-        ftilt.append(fa); rtilt.append(ra)
-        ok += (fa < 30 and ra < 30)
+
+        # It counts as righted if both bodies end within 30 deg of upright
+        front_tilt, rear_tilt = tilt_deg(sim, "front_body"), tilt_deg(sim, "rear_body")
+        front_tilts.append(front_tilt)
+        rear_tilts.append(rear_tilt)
+        n_upright += (front_tilt < 30 and rear_tilt < 30)
+
+    # Close the sim
     env.close()
-    pct = ok
+
+    # Report the success count against the floor, and the inference latency
     floor = RIGHTING_FLOOR[variant]
-    check(f"closed-loop righting >= {floor}% ({variant} tripwire)", pct >= floor,
-          f"{pct}/100 both-upright  |  final tilt med f/r "
-          f"{np.median(ftilt):.0f}/{np.median(rtilt):.0f} deg")
-    print(f"       ONNX inference: mean {np.mean(infer_times):.3f} ms, "
-          f"p99 {np.percentile(infer_times,99):.3f} ms  (budget @50Hz = 20 ms)")
-    return all(results[n_before:])
+    check(f"closed-loop righting >= {floor}% ({variant} tripwire)", n_upright >= floor,
+          f"{n_upright}/{n_drops} both-upright  |  final tilt med f/r "
+          f"{np.median(front_tilts):.0f}/{np.median(rear_tilts):.0f} deg")
+    print(f"       ONNX inference: mean {np.mean(infer_ms):.3f} ms, "
+          f"p99 {np.percentile(infer_ms, 99):.3f} ms  (budget @50Hz = 20 ms)")
 
 
-if __name__ == "__main__":
+def run(variant):
+    """Run every check for one variant."""
+    # Print the variant and the controller constants under test
+    cfg = VARIANTS[variant]
+    onnx_file = onnx_path(variant)
+    print(f"\n=== variant={variant}  env={cfg['env_id']}  onnx={os.path.basename(onnx_file)} ===")
+    print(f"obs={C.STUDENT_OBS_DIM}-dim  filter_alpha={C.FILTER_ALPHA}  "
+          f"ranges(roll/pitch/tail)={C.ROLL_RANGE}/{C.PITCH_RANGE}/{C.TAIL_RANGE}")
+
+    # Load the exported student and the PyTorch student it came from
+    sess = ort.InferenceSession(onnx_file)
+    input_name = sess.get_inputs()[0].name
+    onnx_dim = sess.get_inputs()[0].shape[-1]
+    student = load_student(variant)
+    if student is None:
+        return
+
+    # Check the network: observation width, then ONNX against PyTorch
+    check(f"dims consistent (controller/distill/onnx = {D.STUDENT_OBS_DIM})",
+          C.STUDENT_OBS_DIM == D.STUDENT_OBS_DIM == onnx_dim,
+          f"ctrl={C.STUDENT_OBS_DIM} distill={D.STUDENT_OBS_DIM} onnx={onnx_dim}")
+    check_onnx_matches_torch(sess, input_name, student)
+
+    # Check the controller code against the sim
+    env = gym.make(cfg["env_id"])
+    check_obs_matches_sim(env, sess, input_name, variant)
+    check_targets_match_sim(env)
+    check_closed_loop(env, sess, input_name, variant)
+
+
+def main():
+    """Run the checks for one or both variants; exit with 1 if any check failed."""
+    # Parse the command line
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", choices=list(VARIANTS), default=None,
                         help="ablation condition to test (default: both)")
     args = parser.parse_args()
-    for v in ([args.variant] if args.variant else list(VARIANTS)):
-        run(v)
+
+    # Run the checks
+    for variant in ([args.variant] if args.variant else list(VARIANTS)):
+        run(variant)
+
+    # Summarize
     print("\n=== SUMMARY ===")
     print(f"{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
+
+
+if __name__ == "__main__":
+    main()

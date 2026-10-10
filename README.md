@@ -2,7 +2,7 @@
 
 **A multi-strategy aerial self-righting robot for evaluating the contribution of an actuated tail across fall conditions.**
 
-[Project page](https://ichoi02.github.io/MeowMentum/) · [Drop data](data/hardware_trials) · [Analysis](analysis)
+[Project page](https://ichoi02.github.io/MeowMentum/) · [Drop data](results/hardware_trials) · [Results](results)
 
 <p align="center"><img src="docs/assets/img/robot.jpg" width="640" alt="The robot: two black cylindrical body segments joined by an actuated spine, with a tail rod on the rear segment and red feet"></p>
 
@@ -22,17 +22,15 @@ the analysis that produces the paper's figures and tables.
 
 | Path | Contents |
 |---|---|
-| `cat_env/`, `model/` | Gymnasium/MuJoCo environment and the models for both morphologies (`cat.xml`, `cat_notail.xml`) |
-| `train.py`, `smooth_sac.py` | SAC teacher training on the privileged state, with a temporal smoothness term in the actor loss |
-| `distillation.py` | DAgger distillation into the 11-dim onboard-observation student |
-| `onnx_conversion.py` | Student → ONNX export for the Raspberry Pi |
-| `evaluate.py`, `view_policy.py` | Simulation evaluation at fixed release attitudes; interactive MuJoCo viewer |
+| `train/` | Simulation and learning: the Gymnasium/MuJoCo environment (`cat_env/`), SAC teacher training with a temporal smoothness term in the actor loss (`train.py`, `smooth_sac.py`) and DAgger distillation into the 11-dim onboard-observation student (`distillation.py`) |
+| `model/` | MuJoCo models for both morphologies (`cat.xml`, `cat_notail.xml`) and the variant table (`variants.py`) |
 | `policies/` | The deployed teachers, students and ONNX files ([provenance](#released-policies)) |
-| `hardware/` | Raspberry Pi controller, Teensy firmware, flashing tools ([hardware/README.md](hardware/README.md)) |
-| `tools/` | ONNX/telemetry verification and the PD-gain step-response sweep |
-| `data/hardware_trials/` | 73 hardware drop logs at 50 Hz with a manifest ([data/README.md](data/README.md)) |
-| `analysis/` | Whole-cat score, statistics, Fig. 4 and Fig. 5 ([analysis/README.md](analysis/README.md)) |
-| `results/` | Generated tables and figures, and the training logs of the deployed teachers |
+| `hardware/` | Raspberry Pi controller, Teensy firmware, flashing tools and the student → ONNX export ([hardware/README.md](hardware/README.md)) |
+| `tools/` | Interactive MuJoCo policy viewer, ONNX/telemetry verification and the PD-gain step-response sweep |
+| `results/hardware_trials/` | The 73 hardware drop logs at 50 Hz, with a manifest (`MANIFEST.csv`) |
+| `results/figures/` | Fig. 4 and Fig. 5 (SVG) |
+| `results/training_logs/` | TensorBoard logs of the deployed teachers |
+| `results/plot_scripts/` | Whole-cat score, Table II statistics, and the Fig. 4 and Fig. 5 scripts |
 | `docs/` | Project page (GitHub Pages) |
 
 ## Install
@@ -46,18 +44,20 @@ pip install -r requirements.txt
 
 The pins are the environment this release was verified in. The robot itself needs only
 numpy, scipy, gymnasium, onnxruntime and pyserial (see `hardware/README.md`). Every script
-can be run from any working directory.
+is a module run from the repository root with `python -m`.
 
 ## Reproduce the paper's hardware results
 
 ```bash
-python analysis/reproduce.py
+python -m results.plot_scripts.whole_cat_stats   # Table II
+python -m results.plot_scripts.fig4_tilt         # Fig. 4 and the 1 m / 2 m tilt values
+python -m results.plot_scripts.fig5_whole_cat    # Fig. 5
 ```
 
-This takes about 30 s. It recomputes the whole-cat score of every drop, the ANCOVA with
-HC3 errors, the Holm adjustment and the blocked permutation tests (Table II), the
-1 m / 2 m tilt values, Fig. 4 and Fig. 5. Everything is written to `results/`, and the
-numbers are checked against the paper; the script exits non-zero on any mismatch.
+The first command takes about 30 s. It computes the whole-cat score of every drop, the
+ANCOVA with HC3 errors, the Holm adjustment and the blocked permutation tests, and prints
+Table II; add `--output <dir>` to also save the tables as CSV. The figure scripts write
+`results/figures/fig4_tilt.svg` and `results/figures/fig5_whole_cat.svg`.
 
 | | No tail | With tail | Adjusted tail effect | 95% HC3 CI | *p* |
 |---|---|---|---|---|---|
@@ -68,7 +68,7 @@ numbers are checked against the paper; the script exits non-zero on any mismatch
 ## Verify the deployed policies
 
 ```bash
-python tools/verify_onnx.py --replay
+python -m tools.verify_onnx --replay
 ```
 
 This checks that the ONNX files are bit-identical to the PyTorch students and agree with
@@ -76,19 +76,19 @@ them to float32 rounding. It then replays every hardware log through both polici
 logged joint targets are reproduced to within a few 1e-15 by exactly one policy, which
 identifies the controller that flew each drop.
 
-`python hardware/e2e_test.py --variant tail` (or `notail`) checks, without hardware, that
+`python -m hardware.e2e_test --variant tail` (or `notail`) checks, without hardware, that
 the controller's observation, filtering and joint mapping match the simulator, and that the
 ONNX student still rights the robot in closed loop.
 
 ## Train from scratch
 
 ```bash
-python train.py --variant tail                 # SAC teacher, 1M steps, 10 envs
-python distillation.py --variant tail          # DAgger student, 50 x 2,000 steps
-python onnx_conversion.py --variant tail       # policies/cat_controller.onnx
+python -m train.train --variant tail               # SAC teacher, 1M steps, 10 envs
+python -m train.distillation --variant tail        # DAgger student, 50 x 2,000 steps
+python -m hardware.onnx_conversion --variant tail  # policies/cat_controller.onnx
 ```
 
-Run the same with `--variant notail`. `train.py` and `distillation.py` write timestamped
+Run the same with `--variant notail`. Training and distillation write timestamped
 checkpoints to `policies/`. Copy them to the canonical names (`cat_controller<suffix>.zip`,
 `student_policy<suffix>.pth`) before the next stage. TensorBoard logs go to `run_logs/`.
 
@@ -104,11 +104,10 @@ Weights can be overridden without code changes through `CAT_W_POS`, `CAT_W_EN`,
 `CAT_W_AV`, `CAT_W_JV` and `CAT_W_TIME`. Domain randomisation draws from the global NumPy
 RNG in each worker, so training runs are not bit-reproducible.
 
-To evaluate or watch a policy in simulation:
+To watch a policy in simulation:
 
 ```bash
-python evaluate.py --variant tail --agent student --roll 180 --pitch 45
-mjpython view_policy.py --variant tail --roll 180 --pitch 45 --slow 0.2    # python on Linux
+mjpython -m tools.view_policy --variant tail --roll 180 --pitch 45 --slow 0.2    # python on Linux
 ```
 
 ## Released policies
@@ -121,11 +120,11 @@ mjpython view_policy.py --variant tail --roll 180 --pitch 45 --slow 0.2    # pyt
 | `student_policy.pth`, `student_policy_notail.pth` | DAgger students (MLP 11-256-256-3, tanh) | `ed3ec97b`, `befc4f4d` |
 | `cat_controller.onnx`, `cat_controller_notail.onnx` | ONNX exports run on the Raspberry Pi | `c88c79ca`, `8f3e6990` |
 
-With torch 2.10.0, onnx 1.21.0 and onnxscript 0.6.2, `onnx_conversion.py` reproduces both
-ONNX files byte for byte. The no-tail student was distilled with the raw tail action fed
-back as its previous action (`prev_action[2]`), whereas the robot and `evaluate.py` feed
-back 0. This is documented in `distillation.py` and left unchanged so the code matches
-the released policy.
+With torch 2.10.0, onnx 1.21.0 and onnxscript 0.6.2, `hardware/onnx_conversion.py`
+reproduces both ONNX files byte for byte. The no-tail student was distilled with the raw
+tail action fed back as its previous action (`prev_action[2]`), whereas the robot feeds
+back 0. This is documented in `train/distillation.py` and left unchanged so the code
+matches the released policy.
 
 ## Hardware
 
@@ -136,8 +135,9 @@ observation layout and the telemetry format are in [hardware/README.md](hardware
 
 ## Data notes
 
-The drop logs are kept exactly as recorded. [data/README.md](data/README.md) and
-`data/hardware_trials/MANIFEST.csv` document three points:
+The drop logs are kept exactly as recorded. `results/hardware_trials/MANIFEST.csv` lists
+every drop with its release attitude, the policy that flew it and its whole-cat score.
+Three points about the data:
 - **Excluded short drop.** One with-tail drop reached impact before the 2.5 m evaluation
   point. It is excluded from the whole-cat score, so the with-tail n is 35.
 - **No-tail drops flown with the with-tail policy.** Replay shows that 19 of the 37
@@ -151,8 +151,7 @@ The drop logs are kept exactly as recorded. [data/README.md](data/README.md) and
 The page in `docs/` is static and has no build step. To publish it, open
 Settings → Pages, choose *Deploy from a branch*, and select `main` and the `/docs`
 folder. To preview it locally, run `python -m http.server --directory docs` and open
-http://localhost:8000. `docs/assets/data/build_page_data.py` regenerates the page's data
-from `data/`, `results/` and the policies.
+http://localhost:8000.
 
 ## Citation
 

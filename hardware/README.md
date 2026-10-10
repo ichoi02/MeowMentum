@@ -21,8 +21,8 @@ the Pi over USB, close a 1 kHz PD loop on two joints each.
 - **Control law.** The D term is computed on the measurement, with a one-pole velocity
   low-pass (`VEL_ALPHA` 0.1). Inside a 0.03 rad deadband the motor is stopped. Outside
   it, any nonzero command is raised to at least 100/1023 PWM.
-- **Matching the simulator.** These constants are mirrored in `cat_env/env_util.py` and
-  `cat_env/cat_env.py` (`pd_nominal`). Change both sides together.
+- **Matching the simulator.** These constants are mirrored in `train/cat_env/env_util.py` and
+  `train/cat_env/cat_env.py` (`pd_nominal`). Change both sides together.
   `tools/tune_pd_gains.py` is the MuJoCo step-response sweep behind these gains. With the
   released model and randomisation ranges it selects the deployed pitch and tail gains
   (Kp 20, Kd 1.0) but picks Kp 3, Kd 0.4 for roll; the flashed roll pair is Kp 4, Kd 0.4.
@@ -36,11 +36,12 @@ Gear ratios are listed as configured in the firmware and the simulator.
 | `flash_pd_control_teensy.sh` | Compile both sketches with arduino-cli and flash them with teensy_loader_cli |
 | `discover_teensy.py` | List Teensy serial ports and their USB serial numbers |
 | `e2e_test.py` | Hardware-free test: the controller code driving the MuJoCo sim |
+| `onnx_conversion.py` | Export a distilled student to the ONNX file the Pi runs |
 
 ## Setup
 
 **Pi software.** Install numpy, scipy (1.14 or newer, for `scalar_first`), gymnasium
-(imported via `cat_env`), onnxruntime and pyserial. Pinned versions are in
+(imported via `train/cat_env`), onnxruntime and pyserial. Pinned versions are in
 `requirements.txt`.
 
 **Firmware.** You need three things:
@@ -69,7 +70,7 @@ button on the board the script names. The arduino-cli binary is taken from
 `$ARDUINO_CLI`, then `$CONDA_PREFIX/bin/arduino-cli`, then `PATH`. The Arduino IDE with
 Teensyduino also works: open the `.ino`, select board Teensy 4.0 and USB type Serial.
 
-**Serial numbers.** `python hardware/discover_teensy.py` lists each board's USB serial
+**Serial numbers.** `python -m hardware.discover_teensy` lists each board's USB serial
 number. Put the two numbers into `SN_FRONT` and `SN_BACK` at the top of `controller.py`.
 The flash script reads the same two lines.
 
@@ -78,9 +79,10 @@ The flash script reads the same two lines.
 1. Set the robot upright and level, in its home pose with the spine straight. The
    controller zeroes the encoders and tares the IMU at startup, so this pose becomes the
    zero of every joint and the identity orientation.
-2. Start the controller, naming the morphology that is physically on the robot:
+2. From the repository root, start the controller, naming the morphology that is
+   physically on the robot:
    ```bash
-   python hardware/controller.py --variant tail      # or --variant notail
+   python -m hardware.controller --variant tail      # or --variant notail
    ```
    `--variant` is required (except with `--debug`). It prints the variant and the policy path
    and sha256. Then it:
@@ -116,7 +118,7 @@ The observation has 11 dimensions, in float32. It is identical to
 |---|---|
 | 0-2 | Projected gravity `R^T [0, 0, -1]` from the front quaternion, after tare and alignment `Rz(90°)^-1 · q · Rz(90°)` |
 | 3-6 | Joint angles `[rot1, pitch, rot2, tail]` in rad. For `notail` the tail entry is forced to 0. |
-| 7-9 | The previous raw action `[roll, pitch, tail]` after clipping (zeros at release). For `notail` the tail entry is 0. During DAgger, `distillation.py` instead fed back the unzeroed tail output. |
+| 7-9 | The previous raw action `[roll, pitch, tail]` after clipping (zeros at release). For `notail` the tail entry is 0. During DAgger, `train/distillation.py` instead fed back the unzeroed tail output. |
 | 10 | `min(step / 50, 1)`, which is 0 on the first step |
 
 **Action.** The ONNX output is 3 values in [-1, 1], clipped. For `notail` the tail
@@ -151,7 +153,7 @@ The controller uses only the newest complete line from each board on each tick.
 ## Telemetry CSV
 
 There is one row per 50 Hz control step, starting at free-fall detection: normally 50
-rows; 2 of the 73 logs in `data/hardware_trials/` have 49. Each row holds the sensor
+rows; 2 of the 73 logs in `results/hardware_trials/` have 49. Each row holds the sensor
 values the policy used on that step and the targets it sent.
 
 | Column | Meaning | Unit |
@@ -175,17 +177,17 @@ the encoders: `R_rear = R_front · Rx(F_M1) · Ry(F_M2) · Rx(B_M2)`.
 
 ## Checks
 
-- `python hardware/e2e_test.py [--variant tail|notail]` (no hardware needed). It runs
+- `python -m hardware.e2e_test [--variant tail|notail]` (no hardware needed). It runs
   `controller.py`'s observation, inference, filter and mapping code against the MuJoCo
   sim. It checks:
   - ONNX against PyTorch
   - the controller observation against the sim student observation
   - the filter and mapping against the target the sim executes
   - a closed-loop righting tripwire
-- `python tools/verify_onnx.py --replay` performs three checks:
+- `python -m tools.verify_onnx --replay` performs three checks:
   - the ONNX weights are bit-identical to `policies/student_policy*.pth`
   - torch and onnxruntime agree
-  - it replays every drop in `data/hardware_trials/` through both ONNX files and reports
+  - it replays every drop in `results/hardware_trials/` through both ONNX files and reports
     which policy flew it
 
   Every logged command is reproduced to about 1e-15. The replay also shows that 19 of

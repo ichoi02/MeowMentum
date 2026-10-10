@@ -1,6 +1,6 @@
 # Python 3.10. Pinned to the environment the release was verified in; with these
-# torch/onnx/onnxscript versions onnx_conversion.py reproduces the released ONNX files
-# byte for byte.
+# torch/onnx/onnxscript versions, hardware/onnx_conversion.py reproduces the released
+# ONNX files byte for byte.
 
 # Simulation, teacher training, distillation, evaluation
 numpy==2.2.6
@@ -9,16 +9,16 @@ mujoco==3.5.0
 gymnasium==1.2.3
 stable-baselines3==2.7.1
 torch==2.10.0
-tensorboard==2.20.0   # train.py TensorBoard logging
-tqdm==4.67.1          # train.py progress bar
-rich==14.3.3          # train.py progress bar
+tensorboard==2.20.0   # train/train.py TensorBoard logging
+tqdm==4.67.1          # train/train.py progress bar
+rich==14.3.3          # train/train.py progress bar
 
-# ONNX export (onnx_conversion.py) and ONNX inference (hardware/)
+# ONNX export (hardware/onnx_conversion.py) and ONNX inference (hardware/)
 onnx==1.21.0
 onnxscript==0.6.2
 onnxruntime==1.23.2
 
-# Hardware-trial analysis and plots (analysis/, tools/)
+# Hardware-trial analysis and plots (results/plot_scripts/, tools/)
 pandas==2.3.3
 matplotlib==3.9.4
 

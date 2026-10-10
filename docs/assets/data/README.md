@@ -5,27 +5,6 @@ plain `<script>` tag. Opened from `file://`, everything except the 3D replay wor
 module cannot load from a file URL); serve `docs/` over http to see the replay. The file is
 generated; do not edit it by hand.
 
-## Regenerating
-
-From the repository root:
-
-```bash
-python docs/assets/data/build_page_data.py
-```
-
-The script reads:
-
-| Input | Used for |
-|---|---|
-| `data/hardware_trials/**/*.csv` | `trials`, `tilt`, raw columns of `table2` |
-| `results/model_results.csv`, `results/sweep_results.csv` (whole-cat analysis output) | adjusted columns of `table2` |
-| `policies/student_policy{,_notail}.pth`, `model/cat*.xml`, `cat_env/`, `distillation.py` | `sim`, `meta.model` |
-| `results/training_logs/teacher_{tail,notail}/` (TensorBoard) | `training` |
-
-Every path can be overridden: `--root`, `--data`, `--stats`, `--logs`, `--out`.
-It needs numpy, scipy, pandas, torch, mujoco, gymnasium, stable-baselines3 (imported by
-`distillation.py`) and tensorboard, and takes a few seconds.
-
 ## Schema
 
 All floats are rounded to 4 decimals. Joint angles (`j`, joint `range`) are in radians;
@@ -40,7 +19,7 @@ Quaternions are `[w, x, y, z]` and rotate body to world. Joint vectors are alway
 | `id` | file stem, e.g. `nt_roll_180deg_pitch_+015deg_0817_rep01` |
 | `morph` | physical configuration from the folder: `tail` or `notail` |
 | `roll`, `pitch` | release condition (deg) |
-| `date`, `rep` | session label and repeat number, as written in the file name. Four labels do not match the flight date; see `data/hardware_trials/MANIFEST.csv` (`first_commit_date`, `notes`) |
+| `date`, `rep` | session label and repeat number, as written in the file name. Four labels do not match the flight date; see `results/hardware_trials/MANIFEST.csv` (`first_commit_date`, `notes`) |
 | `included` | `false` only for `wt_roll_090deg_0816_rep03`, whose impact came before 2.5 m of fall |
 | `score`, `s_up`, `s_align` | whole-cat score `S_upright * S_align` and its two factors at 2.5 m of ballistic fall (`t0 + 0.714 s`, both body rotations SLERP-interpolated); `null` when excluded |
 | `policy` | policy that flew: `tail` if the tail command `Cmd_B1` is ever nonzero, else `notail` (the no-tail controller pins it to 0). This agrees with an ONNX replay of every log. 19 `notail` drops flew the `tail` policy |
@@ -79,7 +58,7 @@ all-trials row), and `p_perm` is the blocked permutation p.
 student in MuJoCo per release condition. Physics is nominal (the per-episode domain
 randomization is overwritten with the `model/*.xml` values and the action delay is 0).
 The release has zero angular velocity and zero joint angles, and observations are
-noise-free. The student observation and no-tail masking match `evaluate.py`. Sample k
+noise-free, and the no-tail student's tail channel is held at 0 as on the robot. Sample k
 is the state at `t = 0.02 k` that the k-th action is computed from; the last sample is
 the end of the 1 s episode. `tilt` uses the simulated front and rear body orientations.
 
